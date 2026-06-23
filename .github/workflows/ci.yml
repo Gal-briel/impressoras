@@ -39,6 +39,7 @@ jobs:
           - 5672:5672
 
     env:
+      POSTGRES_SERVER: localhost
       POSTGRES_HOST: localhost
       POSTGRES_PORT: 5432
       POSTGRES_DB: saas_platform
