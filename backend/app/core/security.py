@@ -31,3 +31,14 @@ def get_api_key_hash(api_key: str) -> str:
 def verify_api_key(plain_api_key: str, hashed_api_key: str) -> bool:
     """Compara o hash SHA-256."""
     return get_api_key_hash(plain_api_key) == hashed_api_key
+
+def create_refresh_token(subject: str, tenant_id: str, permissions: list[str], expires_delta: Optional[timedelta] = None) -> str:
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS))
+    to_encode = {
+        "exp": expire,
+        "sub": str(subject),
+        "tenant_id": str(tenant_id),
+        "permissions": permissions,
+        "type": "refresh",
+    }
+    return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)

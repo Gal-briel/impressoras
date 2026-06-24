@@ -1,22 +1,10 @@
-// frontend/src/App.tsx
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { AppRouter } from './presentation/routes/AppRouter';
+import { AppProviders } from './providers/AppProviders';
+import { AppRouter } from './routes/AppRouter';
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      refetchOnWindowFocus: false,
-      retry: 1,
-    },
-  },
-});
-
-function App() {
+export default function App() {
   return (
-    <QueryClientProvider client={queryClient}>
+    <AppProviders>
       <AppRouter />
-    </QueryClientProvider>
+    </AppProviders>
   );
 }
-
-export default App;

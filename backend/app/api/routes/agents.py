@@ -136,6 +136,43 @@ async def report_agent_event(
     return {"status": "accepted"}
 
 
+@router.get("/{agent_id}/events", status_code=status.HTTP_200_OK)
+async def list_agent_events(
+    agent_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    agent_service: AgentService = Depends(get_agent_service),
+):
+    agent = await agent_service.repository.get(agent_id)
+    if not agent or str(agent.tenant_id) != current_user.tenant_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+
+    from sqlalchemy import select
+    from app.core.database import AsyncSessionLocal
+    from app.infrastructure.database.models import AgentEvent
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(AgentEvent)
+            .where(AgentEvent.agent_id == agent_id, AgentEvent.tenant_id == UUID(current_user.tenant_id))
+            .order_by(AgentEvent.created_at.desc())
+            .limit(100)
+        )
+        events = result.scalars().all()
+        items = [
+            {
+                "id": event.id,
+                "tenant_id": event.tenant_id,
+                "agent_id": event.agent_id,
+                "event_type": event.event_type,
+                "message": event.message,
+                "severity": str(event.severity.value if hasattr(event.severity, "value") else event.severity),
+                "created_at": event.created_at,
+            }
+            for event in events
+        ]
+        return {"items": items, "total": len(items)}
+
+
 @router.patch("/{agent_id}/revoke", response_model=AgentResponse, status_code=status.HTTP_200_OK)
 async def revoke_agent(
     agent_id: UUID,

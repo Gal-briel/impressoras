@@ -31,8 +31,13 @@ PERMISSIONS = [
     "agents:read",
     "agents:write",
     "commands:execute",
+    "commands:approve",
     "agent-tags:write",
     "agent-groups:write",
+    "printers.read",
+    "audit.read",
+    "settings.read",
+    "users.manage",
 ]
 
 

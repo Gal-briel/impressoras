@@ -5,9 +5,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import agent_groups, agent_tags, agents, commands, websockets
+from app.api.routes import agent_groups, agent_tags, agents, audit, auth, commands, printers, settings as settings_routes, websockets
 from app.core.config import settings
 from app.core.middleware import AuditMiddleware
+from app.core.openapi import configure_openapi
 from app.core.redis import redis_client
 from app.websocket.manager import websocket_manager
 from app.workers.rabbitmq import rabbitmq_client
@@ -30,7 +31,9 @@ async def lifespan(app: FastAPI):
     finally:
         for task in tasks:
             task.cancel()
+
         await redis_client.close()
+
         if rabbitmq_client.connection:
             await rabbitmq_client.connection.close()
 
@@ -42,6 +45,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+configure_openapi(app)
+
 app.add_middleware(AuditMiddleware)
 
 app.add_middleware(
@@ -52,6 +57,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+app.include_router(auth.router, prefix=settings.API_V1_STR)
+app.include_router(printers.router, prefix=settings.API_V1_STR)
+app.include_router(audit.router, prefix=settings.API_V1_STR)
+app.include_router(settings_routes.router, prefix=settings.API_V1_STR)
 app.include_router(commands.router, prefix=settings.API_V1_STR)
 app.include_router(agents.router, prefix=settings.API_V1_STR)
 app.include_router(agent_tags.router, prefix=settings.API_V1_STR)
