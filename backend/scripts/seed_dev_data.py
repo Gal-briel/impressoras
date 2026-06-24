@@ -2,22 +2,30 @@
 
 Uso:
     cd backend
-    python scripts/seed_dev_data.py
+    PYTHONPATH=. python scripts/seed_dev_data.py
 
-Login administrativo conceitual:
+Login administrativo:
     admin@example.com / admin123
 
 O script também imprime um JWT e uma API Key de agente para testes via Swagger/curl.
 """
-import asyncio
-from uuid import uuid4
 
-from sqlalchemy import select
+import asyncio
+
+from sqlalchemy import delete, insert, select
 
 from app.core.database import AsyncSessionLocal
 from app.core.security import create_access_token, get_api_key_hash, get_password_hash
 from app.infrastructure.database.enums import EnrollmentStatus, UserStatus
-from app.infrastructure.database.models import Agent, Permission, Role, Tenant, User
+from app.infrastructure.database.models import (
+    Agent,
+    Permission,
+    Role,
+    Tenant,
+    User,
+    role_permissions,
+)
+
 
 PERMISSIONS = [
     "agents:read",
@@ -32,33 +40,84 @@ async def main() -> None:
     api_key = "dev-agent-api-key"
 
     async with AsyncSessionLocal() as session:
-        result = await session.execute(select(Tenant).where(Tenant.name == "Tenant Dev"))
+        result = await session.execute(
+            select(Tenant).where(Tenant.name == "Tenant Dev")
+        )
         tenant = result.scalars().first()
+
         if not tenant:
-            tenant = Tenant(name="Tenant Dev", active=True)
+            tenant = Tenant(
+                name="Tenant Dev",
+                active=True,
+            )
             session.add(tenant)
             await session.flush()
 
-        existing_permissions = {}
+        existing_permissions: dict[str, Permission] = {}
+
         for name in PERMISSIONS:
-            result = await session.execute(select(Permission).where(Permission.name == name))
+            result = await session.execute(
+                select(Permission).where(Permission.name == name)
+            )
             permission = result.scalars().first()
+
             if not permission:
-                permission = Permission(name=name, description=f"Dev permission {name}")
+                permission = Permission(
+                    name=name,
+                    description=f"Dev permission {name}",
+                )
                 session.add(permission)
                 await session.flush()
+
             existing_permissions[name] = permission
 
-        result = await session.execute(select(Role).where(Role.tenant_id == tenant.id, Role.name == "Admin Dev"))
+        result = await session.execute(
+            select(Role).where(
+                Role.tenant_id == tenant.id,
+                Role.name == "Admin Dev",
+            )
+        )
         role = result.scalars().first()
+
         if not role:
-            role = Role(tenant_id=tenant.id, name="Admin Dev", description="Perfil admin local")
+            role = Role(
+                tenant_id=tenant.id,
+                name="Admin Dev",
+                description="Perfil admin local",
+            )
             session.add(role)
             await session.flush()
-        role.permissions = list(existing_permissions.values())
 
-        result = await session.execute(select(User).where(User.tenant_id == tenant.id, User.email == "admin@example.com"))
+        # Evita lazy loading async em role.permissions.
+        # Não use: role.permissions = [...]
+        await session.execute(
+            delete(role_permissions).where(
+                role_permissions.c.role_id == role.id,
+            )
+        )
+
+        permission_rows = [
+            {
+                "role_id": role.id,
+                "permission_id": permission.id,
+            }
+            for permission in existing_permissions.values()
+        ]
+
+        if permission_rows:
+            await session.execute(
+                insert(role_permissions),
+                permission_rows,
+            )
+
+        result = await session.execute(
+            select(User).where(
+                User.tenant_id == tenant.id,
+                User.email == "admin@example.com",
+            )
+        )
         user = result.scalars().first()
+
         if not user:
             user = User(
                 tenant_id=tenant.id,
@@ -69,9 +128,20 @@ async def main() -> None:
             )
             session.add(user)
             await session.flush()
+        else:
+            user.role_id = role.id
+            user.status = UserStatus.ACTIVE
+            session.add(user)
+            await session.flush()
 
-        result = await session.execute(select(Agent).where(Agent.tenant_id == tenant.id, Agent.hostname == "DEV-AGENT-01"))
+        result = await session.execute(
+            select(Agent).where(
+                Agent.tenant_id == tenant.id,
+                Agent.hostname == "DEV-AGENT-01",
+            )
+        )
         agent = result.scalars().first()
+
         if not agent:
             agent = Agent(
                 tenant_id=tenant.id,
@@ -82,14 +152,34 @@ async def main() -> None:
                 last_ip="127.0.0.1",
                 enrollment_status=EnrollmentStatus.APPROVED,
                 api_key_hash=get_api_key_hash(api_key),
-                capabilities=["commands", "printers", "watchdog", "auto_update"],
+                capabilities=[
+                    "commands",
+                    "printers",
+                    "watchdog",
+                    "auto_update",
+                ],
             )
+            session.add(agent)
+            await session.flush()
+        else:
+            agent.enrollment_status = EnrollmentStatus.APPROVED
+            agent.api_key_hash = get_api_key_hash(api_key)
+            agent.capabilities = [
+                "commands",
+                "printers",
+                "watchdog",
+                "auto_update",
+            ]
             session.add(agent)
             await session.flush()
 
         await session.commit()
 
-        token = create_access_token(str(user.id), str(tenant.id), PERMISSIONS)
+        token = create_access_token(
+            str(user.id),
+            str(tenant.id),
+            PERMISSIONS,
+        )
 
     print("Tenant ID:", tenant.id)
     print("User ID:", user.id)
