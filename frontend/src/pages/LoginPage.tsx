@@ -2,6 +2,7 @@ import { FormEvent, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { login } from '../api/authApi';
 import { Button } from '../components/ui/Button';
+import { Input } from '../components/ui/Input';
 import { useAuthStore } from '../stores/authStore';
 import { getApiErrorMessage } from '../api/httpClient';
 
@@ -33,39 +34,51 @@ export function LoginPage() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div>
-        <label className="text-sm font-medium text-slate-700 dark:text-slate-200">E-mail</label>
-        <input
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          type="email"
-          className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-100 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
-          required
-        />
+    <form onSubmit={handleSubmit} className="space-y-5">
+      <Input
+        label="E-mail"
+        name="email"
+        value={email}
+        onChange={(event) => setEmail(event.target.value)}
+        type="email"
+        placeholder="seu.email@empresa.com"
+        autoComplete="email"
+        required
+      />
+
+      <Input
+        label="Senha"
+        name="password"
+        value={password}
+        onChange={(event) => setPassword(event.target.value)}
+        type="password"
+        placeholder="Digite sua senha"
+        autoComplete="current-password"
+        required
+      />
+
+      <Input
+        label="Tenant ID opcional"
+        name="tenantId"
+        value={tenantId}
+        onChange={(event) => setTenantId(event.target.value)}
+        placeholder="Use somente se houver múltiplos tenants"
+        helperText="Normalmente este campo fica em branco."
+      />
+
+      {error && (
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+          {error}
+        </div>
+      )}
+
+      <Button type="submit" size="lg" className="w-full" disabled={isSubmitting}>
+        {isSubmitting ? 'Entrando...' : 'Entrar no painel'}
+      </Button>
+
+      <div className="rounded-2xl bg-slate-50 p-4 text-center text-xs text-slate-500 dark:bg-slate-950 dark:text-slate-400">
+        Ambiente dev: <strong>admin@example.com</strong> / <strong>admin123</strong>
       </div>
-      <div>
-        <label className="text-sm font-medium text-slate-700 dark:text-slate-200">Senha</label>
-        <input
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          type="password"
-          className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-100 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
-          required
-        />
-      </div>
-      <div>
-        <label className="text-sm font-medium text-slate-700 dark:text-slate-200">Tenant ID opcional</label>
-        <input
-          value={tenantId}
-          onChange={(event) => setTenantId(event.target.value)}
-          placeholder="Use somente se houver múltiplos tenants com mesmo e-mail"
-          className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-brand-600 focus:ring-2 focus:ring-brand-100 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
-        />
-      </div>
-      {error && <div className="rounded-xl bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">{error}</div>}
-      <Button type="submit" className="w-full" disabled={isSubmitting}>{isSubmitting ? 'Entrando...' : 'Entrar'}</Button>
-      <p className="text-center text-xs text-slate-500 dark:text-slate-400">Ambiente dev: admin@example.com / admin123</p>
     </form>
   );
 }
