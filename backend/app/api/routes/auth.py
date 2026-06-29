@@ -1,4 +1,3 @@
-# backend/app/api/routes/auth.py
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
@@ -17,7 +16,10 @@ def get_auth_service(session: AsyncSession = Depends(get_db_session)) -> AuthSer
 
 
 @router.post("/auth/login", response_model=LoginResponse)
-async def login(payload: LoginRequest, auth_service: AuthService = Depends(get_auth_service)):
+async def login(
+    payload: LoginRequest,
+    auth_service: AuthService = Depends(get_auth_service),
+):
     return await auth_service.authenticate(
         email=payload.email,
         password=payload.password,
@@ -26,7 +28,10 @@ async def login(payload: LoginRequest, auth_service: AuthService = Depends(get_a
 
 
 @router.post("/auth/refresh", response_model=TokenResponse)
-async def refresh(payload: RefreshRequest, auth_service: AuthService = Depends(get_auth_service)):
+async def refresh(
+    payload: RefreshRequest,
+    auth_service: AuthService = Depends(get_auth_service),
+):
     return await auth_service.refresh(payload.refresh_token)
 
 

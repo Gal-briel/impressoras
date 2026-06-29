@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
+    # Agent/dev
+    AGENT_API_KEY: str = "dev-agent-api-key"
+
     # Infra
     REDIS_URL: str
     RABBITMQ_URL: str

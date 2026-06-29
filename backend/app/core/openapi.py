@@ -4,6 +4,11 @@ from fastapi.openapi.utils import get_openapi
 
 
 AGENT_AUTH_PATHS = {
+    ("/api/v1/agent/check-in", "post"),
+    ("/api/v1/agent/events", "post"),
+    ("/api/v1/agent/printers/inventory", "post"),
+    ("/api/v1/agent/commands/pending", "get"),
+    ("/api/v1/agent/commands/{command_id}/status", "post"),
     ("/api/v1/agents/check-in", "post"),
     ("/api/v1/agents/events", "post"),
     ("/api/v1/agents/version", "get"),

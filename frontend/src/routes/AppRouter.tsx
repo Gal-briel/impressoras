@@ -1,58 +1,39 @@
-import { Navigate, createBrowserRouter, RouterProvider } from 'react-router-dom';
-import { AuthLayout } from '../layouts/AuthLayout';
-import { MainLayout } from '../layouts/MainLayout';
-import { ProtectedRoute } from './ProtectedRoute';
-import { LoginPage } from '../pages/LoginPage';
-import { DashboardPage } from '../pages/Dashboard/DashboardPage';
-import { AgentsPage } from '../pages/Agents/AgentsPage';
-import { AgentDetailPage } from '../pages/Agents/AgentDetailPage';
-import { PrintersPage } from '../pages/Printers/PrintersPage';
-import { CommandsPage } from '../pages/Commands/CommandsPage';
-import { AuditPage } from '../pages/Audit/AuditPage';
-import { SettingsPage } from '../pages/Settings/SettingsPage';
-import { UsersPage } from '../pages/Settings/UsersPage';
-import { RolesPage } from '../pages/Settings/RolesPage';
-import { TenantsPage } from '../pages/Settings/TenantsPage';
+import { Navigate, Route, Routes } from 'react-router-dom';
 
-const router = createBrowserRouter([
-  {
-    element: <AuthLayout />,
-    children: [{ path: '/login', element: <LoginPage /> }],
-  },
-  {
-    element: <ProtectedRoute />,
-    children: [
-      {
-        element: <MainLayout />,
-        children: [
-          { index: true, element: <Navigate to="/dashboard" replace /> },
-          { path: '/dashboard', element: <DashboardPage /> },
-          { element: <ProtectedRoute requiredPermission="agents.read" />, children: [
-            { path: '/agents', element: <AgentsPage /> },
-            { path: '/agents/:agentId', element: <AgentDetailPage /> },
-          ] },
-          { element: <ProtectedRoute requiredPermission="printers.read" />, children: [
-            { path: '/printers', element: <PrintersPage /> },
-          ] },
-          { element: <ProtectedRoute requiredPermission="commands.execute" />, children: [
-            { path: '/commands', element: <CommandsPage /> },
-          ] },
-          { element: <ProtectedRoute requiredPermission="audit.read" />, children: [
-            { path: '/audit', element: <AuditPage /> },
-          ] },
-          { element: <ProtectedRoute requiredPermission="settings.read" />, children: [
-            { path: '/settings', element: <SettingsPage /> },
-            { path: '/settings/users', element: <UsersPage /> },
-            { path: '/settings/roles', element: <RolesPage /> },
-            { path: '/settings/tenants', element: <TenantsPage /> },
-          ] },
-        ],
-      },
-    ],
-  },
-  { path: '*', element: <Navigate to="/dashboard" replace /> },
-]);
+import { LoginPage } from '../features/auth/pages/LoginPage';
+import { AgentDetailsPage } from '../features/agents/pages/AgentDetailsPage';
+import { AgentsPage } from '../features/agents/pages/AgentsPage';
+import { CommandsPage } from '../features/commands/pages/CommandsPage';
+import { DashboardPage } from '../features/dashboard/pages/DashboardPage';
+import { PrinterDetailsPage } from '../features/printers/pages/PrinterDetailsPage';
+import { PrintersPage } from '../features/printers/pages/PrintersPage';
+import { MainLayout } from '../layouts/MainLayout';
+import { PlaceholderPage } from '../pages/PlaceholderPage';
+import { InventoryDevicesPage } from '../features/inventory/pages/InventoryDevicesPage';
+import { BulkCommandsPage } from '../features/bulk-commands/pages/BulkCommandsPage';
+import { CommandHistoryPage } from '../features/command-history/pages/CommandHistoryPage';
 
 export function AppRouter() {
-  return <RouterProvider router={router} />;
+  return (
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+
+      <Route element={<MainLayout />}>
+        <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/agents" element={<AgentsPage />} />
+        <Route path="/inventory" element={<InventoryDevicesPage />} />
+        <Route path="/bulk-commands" element={<BulkCommandsPage />} />
+        <Route path="/command-history" element={<CommandHistoryPage />} />
+        <Route path="/agents/:id" element={<AgentDetailsPage />} />
+        <Route path="/printers" element={<PrintersPage />} />
+        <Route path="/printers/:id" element={<PrinterDetailsPage />} />
+        <Route path="/commands" element={<CommandsPage />} />
+        <Route path="/audit" element={<PlaceholderPage title="Auditoria" />} />
+        <Route path="/settings" element={<PlaceholderPage title="Configurações" />} />
+      </Route>
+
+      <Route path="/" element={<Navigate to="/login" replace />} />
+      <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
+  );
 }

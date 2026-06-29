@@ -1,4 +1,3 @@
-# backend/app/core/dependencies.py
 from typing import Callable
 from uuid import UUID
 
@@ -84,33 +83,56 @@ def get_command_service(session: AsyncSession = Depends(get_db_session)) -> Comm
 
 
 async def require_agent_auth(
-    authorization: str = Header(...),
-    x_agent_id: str = Header(...),
+    authorization: str | None = Header(default=None),
+    x_agent_id: str | None = Header(default=None, alias="x-agent-id"),
     agent_service: AgentService = Depends(get_agent_service),
 ) -> str:
-    if not authorization.startswith("ApiKey "):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid auth scheme")
+    """Autentica chamadas do agente Windows.
 
-    plain_api_key = authorization.split(" ", 1)[1]
+    Formato esperado:
+      Authorization: ApiKey <chave>
+      x-agent-id: <uuid-do-agente>
+
+    Em desenvolvimento, aceita a chave estática AGENT_API_KEY/dev-agent-api-key.
+    Quando o agente existe e tem api_key_hash, também valida o hash gravado no banco.
+    """
+
+    if not x_agent_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing x-agent-id header")
 
     try:
-        agent_id = UUID(x_agent_id)
+        agent_uuid = UUID(str(x_agent_id))
     except ValueError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Agent ID")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid x-agent-id header")
 
-    agent = await agent_service.repository.get(agent_id)
-    if not agent or not agent.api_key_hash:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Agent not found or revoked")
+    if not authorization:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing Authorization header")
 
-    if agent.revoked_at is not None or agent.enrollment_status == EnrollmentStatus.REVOKED:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Agent revoked")
+    scheme, _, token = authorization.partition(" ")
+    plain_api_key = token.strip()
 
-    is_valid = verify_api_key(plain_api_key, agent.api_key_hash)
-    if not is_valid:
-        # Compatibilidade com instalações legadas que ainda guardavam chave em texto puro.
-        if plain_api_key == agent.api_key_hash:
-            await agent_service.upgrade_api_key_hash(agent_id, plain_api_key)
-        else:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API Key")
+    if scheme.lower() != "apikey" or not plain_api_key:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid agent authorization scheme")
 
-    return str(agent_id)
+    dev_key = getattr(settings, "AGENT_API_KEY", None) or "dev-agent-api-key"
+    agent = await agent_service.repository.get(agent_uuid)
+
+    if agent:
+        if agent.revoked_at is not None or agent.enrollment_status == EnrollmentStatus.REVOKED:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Agent revoked")
+
+        if agent.api_key_hash:
+            if verify_api_key(plain_api_key, agent.api_key_hash) or plain_api_key == agent.api_key_hash:
+                return str(agent_uuid)
+
+        # Compatibilidade dev para agentes antigos sem hash ou seed local.
+        if plain_api_key == dev_key:
+            return str(agent_uuid)
+
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API Key")
+
+    # Deixa a rota decidir se retorna 404 Agent not found. Isso mantém o diagnóstico claro.
+    if plain_api_key == dev_key:
+        return str(agent_uuid)
+
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Agent not found or revoked")

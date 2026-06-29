@@ -1,32 +1,24 @@
-import type { InputHTMLAttributes, ReactNode } from 'react';
+import { InputHTMLAttributes } from 'react';
 
 type InputProps = InputHTMLAttributes<HTMLInputElement> & {
-  label?: string;
-  helperText?: string;
+  label: string;
   error?: string;
-  leftIcon?: ReactNode;
 };
 
-export function Input({ label, helperText, error, leftIcon, className = '', id, ...props }: InputProps) {
-  const inputId = id ?? props.name;
-
+export function Input({ label, error, className = '', ...props }: InputProps) {
   return (
-    <div className="space-y-1.5">
-      {label && (
-        <label htmlFor={inputId} className="text-sm font-medium text-slate-700 dark:text-slate-200">
-          {label}
-        </label>
-      )}
-      <div className="relative">
-        {leftIcon && <div className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">{leftIcon}</div>}
-        <input
-          id={inputId}
-          className={`focus-ring h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-950 shadow-sm outline-none transition placeholder:text-slate-400 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:placeholder:text-slate-500 ${leftIcon ? 'pl-10' : ''} ${error ? 'border-red-300 focus:ring-red-500 dark:border-red-800' : ''} ${className}`}
-          {...props}
-        />
-      </div>
-      {helperText && !error && <p className="text-xs text-slate-500 dark:text-slate-400">{helperText}</p>}
-      {error && <p className="text-xs font-medium text-red-600 dark:text-red-300">{error}</p>}
-    </div>
+    <label className="block">
+      <span className="mb-1.5 block text-sm font-medium text-slate-700">{label}</span>
+      <input
+        className={[
+          'w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm',
+          'placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100',
+          error ? 'border-red-400 focus:border-red-500 focus:ring-red-100' : '',
+          className,
+        ].join(' ')}
+        {...props}
+      />
+      {error && <span className="mt-1 block text-xs text-red-600">{error}</span>}
+    </label>
   );
 }

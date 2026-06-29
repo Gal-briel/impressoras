@@ -1,17 +1,26 @@
-import type { ReactNode } from 'react';
-import { QueryProvider } from './QueryProvider';
-import { AuthBootstrap } from './AuthBootstrap';
-import { ThemeProvider } from './ThemeProvider';
-import { WebSocketProvider } from '../websocket/WebSocketProvider';
+import { ReactNode } from 'react';
+import { BrowserRouter } from 'react-router-dom';
 
-export function AppProviders({ children }: { children: ReactNode }) {
+import { NotificationsContainer } from '../features/notifications/NotificationsContainer';
+import { NotificationsProvider } from '../features/notifications/NotificationsProvider';
+import { RealtimeProvider } from '../features/realtime/RealtimeProvider';
+import { QueryProvider } from './QueryProvider';
+
+type AppProvidersProps = {
+  children: ReactNode;
+};
+
+export function AppProviders({ children }: AppProvidersProps) {
   return (
-    <ThemeProvider>
+    <BrowserRouter>
       <QueryProvider>
-        <AuthBootstrap>
-          <WebSocketProvider>{children}</WebSocketProvider>
-        </AuthBootstrap>
+        <NotificationsProvider>
+          <RealtimeProvider>
+            {children}
+            <NotificationsContainer />
+          </RealtimeProvider>
+        </NotificationsProvider>
       </QueryProvider>
-    </ThemeProvider>
+    </BrowserRouter>
   );
 }

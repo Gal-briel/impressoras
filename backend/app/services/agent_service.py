@@ -66,7 +66,11 @@ class AgentService:
 
         mapped = [await self._map_to_response(agent) for agent in agents]
         if status_filter:
-            mapped = [agent for agent in mapped if agent.calculated_status.value == status_filter or agent.calculated_status == status_filter]
+            mapped = [
+                agent
+                for agent in mapped
+                if str(getattr(agent.calculated_status, "value", agent.calculated_status)) == status_filter
+            ]
             total = len(mapped)
 
         return AgentListResponse(items=mapped, total=total)
@@ -88,12 +92,11 @@ class AgentService:
         await self.repository.update(agent, update_data)
         await self.repository.session.commit()
 
-        if redis_client.client:
-            await redis_client.client.setex(
-                name=f"agent:presence:{str(agent_id)}",
-                time=60,
-                value="1",
-            )
+        await redis_client.safe_setex(
+            name=f"agent:presence:{str(agent_id)}",
+            time=60,
+            value="1",
+        )
 
         return {"pending_commands": 0}
 
@@ -104,12 +107,11 @@ class AgentService:
             await self.repository.update(agent, {"last_seen": now})
             await self.repository.session.commit()
 
-            if redis_client.client:
-                await redis_client.client.setex(
-                    name=f"agent:presence:{str(agent_id)}",
-                    time=60,
-                    value="1",
-                )
+            await redis_client.safe_setex(
+                name=f"agent:presence:{str(agent_id)}",
+                time=60,
+                value="1",
+            )
 
             await websocket_manager.broadcast_event(
                 str(agent.tenant_id),
@@ -139,10 +141,10 @@ class AgentService:
             os_version=agent.os_version,
             agent_version=agent.agent_version,
             last_ip=agent.last_ip,
-            enrollment_status=agent.enrollment_status,
-            capabilities=agent.capabilities or [],
+            enrollment_status=str(getattr(agent.enrollment_status, "value", agent.enrollment_status)),
+            capabilities=list(agent.capabilities or []),
             last_seen=agent.last_seen,
-            calculated_status=calculated_status,
+            calculated_status=str(getattr(calculated_status, "value", calculated_status)),
             created_at=agent.created_at,
             revoked_at=agent.revoked_at,
             revoked_by=agent.revoked_by,
@@ -185,8 +187,7 @@ class AgentService:
             )
             await self.repository.session.commit()
 
-            if redis_client.client:
-                await redis_client.client.delete(f"agent:presence:{str(agent_id)}")
+            await redis_client.safe_delete(f"agent:presence:{str(agent_id)}")
 
             await websocket_manager.close_agent_connection(str(agent_id), code=1008, reason="Agent revoked")
             await websocket_manager.broadcast_event(

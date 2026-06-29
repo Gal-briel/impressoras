@@ -1,5 +1,19 @@
-import type { ReactNode } from 'react';
+import { HTMLAttributes, ReactNode } from 'react';
 
-export function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return <div className={`glass-panel rounded-2xl p-5 ${className}`}>{children}</div>;
+type CardProps = HTMLAttributes<HTMLDivElement> & {
+  children: ReactNode;
+};
+
+export function Card({ children, className = '', ...props }: CardProps) {
+  return (
+    <div
+      className={[
+        'rounded-2xl border border-slate-200 bg-white shadow-sm',
+        className,
+      ].join(' ')}
+      {...props}
+    >
+      {children}
+    </div>
+  );
 }

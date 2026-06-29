@@ -1,4 +1,3 @@
-# backend/app/api/schemas/auth_schemas.py
 from typing import List, Optional
 from uuid import UUID
 

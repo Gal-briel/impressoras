@@ -1,0 +1,8 @@
+{
+  "base_url": "http://localhost:8000/api/v1",
+  "agent_id": "50ab54df-c4ca-4b1b-a7a6-e0940ec7b94a",
+  "api_key": "dev-agent-api-key",
+  "agent_version": "0.1.0",
+  "poll_seconds": 5,
+  "command_limit": 5
+}
