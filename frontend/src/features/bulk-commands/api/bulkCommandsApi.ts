@@ -131,8 +131,8 @@ export async function createBulkCommands(
         agent_id: agent.id,
         agent_name: getAgentName(agent),
         ok: true,
-        command_id: response?.id || response?.command_id,
-        status: normalizeCommandStatus(response?.status || 'pending'),
+        command_id: (response as { id?: string; command_id?: string })?.id || (response as { id?: string; command_id?: string })?.command_id,
+        status: normalizeCommandStatus((response as { status?: string })?.status || 'pending'),
       } satisfies BulkCommandResult;
     })
   );

@@ -1,36 +1,49 @@
-import { ButtonHTMLAttributes, ReactNode } from 'react';
+import type { ButtonHTMLAttributes, ReactNode } from 'react';
 
-type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost';
+export type ButtonVariant =
+  | 'primary'
+  | 'secondary'
+  | 'danger'
+  | 'ghost'
+  | 'outline';
 
-type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+export type ButtonSize = 'sm' | 'md' | 'lg';
+
+export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   children: ReactNode;
   variant?: ButtonVariant;
   fullWidth?: boolean;
-};
-
-const variantClasses: Record<ButtonVariant, string> = {
-  primary: 'bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500',
-  secondary: 'bg-slate-100 text-slate-900 hover:bg-slate-200 focus:ring-slate-400',
-  danger: 'bg-red-600 text-white hover:bg-red-700 focus:ring-red-500',
-  ghost: 'bg-transparent text-slate-600 hover:bg-slate-100 focus:ring-slate-300',
+  size?: ButtonSize | string;
 };
 
 export function Button({
   children,
   variant = 'primary',
   fullWidth = false,
+  size = 'md',
   className = '',
-  disabled,
   ...props
 }: ButtonProps) {
+  const variants: Record<ButtonVariant, string> = {
+    primary: 'bg-blue-600 text-white hover:bg-blue-700',
+    secondary: 'bg-slate-100 text-slate-700 hover:bg-slate-200',
+    danger: 'bg-rose-600 text-white hover:bg-rose-700',
+    ghost: 'bg-transparent text-slate-700 hover:bg-slate-100',
+    outline: 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50',
+  };
+
+  const sizes: Record<string, string> = {
+    sm: 'px-3 py-1.5 text-xs',
+    md: 'px-4 py-2 text-sm',
+    lg: 'px-5 py-3 text-sm',
+  };
+
   return (
     <button
-      disabled={disabled}
       className={[
-        'inline-flex items-center justify-center rounded-lg px-4 py-2.5 text-sm font-semibold shadow-sm transition',
-        'focus:outline-none focus:ring-2 focus:ring-offset-2',
-        'disabled:cursor-not-allowed disabled:opacity-60',
-        variantClasses[variant],
+        'inline-flex items-center justify-center rounded-lg font-semibold transition disabled:cursor-not-allowed disabled:opacity-60',
+        variants[variant] ?? variants.primary,
+        sizes[String(size)] ?? sizes.md,
         fullWidth ? 'w-full' : '',
         className,
       ].join(' ')}
@@ -40,3 +53,5 @@ export function Button({
     </button>
   );
 }
+
+export default Button;

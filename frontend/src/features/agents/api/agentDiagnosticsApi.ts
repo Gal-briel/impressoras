@@ -106,7 +106,7 @@ export async function getAgentCommands(agentId: string): Promise<AgentCommandSum
 
   if (Array.isArray(data)) return data;
 
-  return data.items || [];
+  return (data as { items?: AgentCommandSummary[] }).items || [];
 }
 
 export async function getLatestAgentDiagnostics(agentId: string): Promise<LatestDiagnosticsResult> {
