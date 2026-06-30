@@ -245,6 +245,9 @@ class Command(Base, TimestampMixin):
     status: Mapped[CommandStatus] = mapped_column(String(50), default=CommandStatus.QUEUED, nullable=False)
     timeout_seconds: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    dispatched_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Campos já usados pelo CommandService em retries. Mantidos aqui para não quebrar o fluxo existente.
     retry_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

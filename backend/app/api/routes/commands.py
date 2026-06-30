@@ -204,8 +204,12 @@ async def agent_list_pending_commands(
     commands = list(result.scalars().all())
 
     for command in commands:
-        if str(command.status) == CommandStatus.QUEUED.value:
-            command.status = CommandStatus.DISPATCHED.value
+        status_value = command.status.value if hasattr(command.status, "value") else str(command.status)
+
+        if status_value == CommandStatus.QUEUED.value:
+            command.status = CommandStatus.DISPATCHED
+            if getattr(command, "dispatched_at", None) is None:
+                command.dispatched_at = now
 
     await session.commit()
 

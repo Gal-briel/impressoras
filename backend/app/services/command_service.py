@@ -79,8 +79,13 @@ class CommandService:
             return
 
         # Requisito: impedir execução após expiração
-        if datetime.now(timezone.utc) > command.expires_at and command.status not in [CommandStatus.SUCCESS, CommandStatus.FAILED, CommandStatus.CANCELLED, CommandStatus.EXPIRED]:
-            await self.repository.update(command, {"status": CommandStatus.EXPIRED, "error_code": "COMMAND_EXPIRED_BEFORE_EXECUTION"})
+        now = datetime.now(timezone.utc)
+        if now > command.expires_at and command.status not in [CommandStatus.SUCCESS, CommandStatus.FAILED, CommandStatus.CANCELLED, CommandStatus.EXPIRED]:
+            await self.repository.update(command, {
+                "status": CommandStatus.EXPIRED,
+                "error_code": "COMMAND_EXPIRED_BEFORE_EXECUTION",
+                "finished_at": now,
+            })
             await self.repository.session.commit()
             return
 
@@ -94,7 +99,23 @@ class CommandService:
             return
 
         # Executa a transição segura
+        now = datetime.now(timezone.utc)
         update_data = {"status": new_status}
+
+        if new_status in [CommandStatus.DISPATCHED, CommandStatus.ACKNOWLEDGED]:
+            if getattr(command, "dispatched_at", None) is None:
+                update_data["dispatched_at"] = now
+
+        if new_status == CommandStatus.EXECUTING:
+            if getattr(command, "dispatched_at", None) is None:
+                update_data["dispatched_at"] = now
+            if getattr(command, "started_at", None) is None:
+                update_data["started_at"] = now
+
+        if new_status in [CommandStatus.SUCCESS, CommandStatus.FAILED, CommandStatus.CANCELLED, CommandStatus.EXPIRED]:
+            if getattr(command, "finished_at", None) is None:
+                update_data["finished_at"] = now
+
         if output is not None:
             update_data["output"] = output
         if error_code is not None:
@@ -173,11 +194,20 @@ class CommandService:
         # Se for SUCCESS ou se os retries falharem definitivamente, segue o fluxo normal
         final_status = CommandStatus.SUCCESS if payload_status == "SUCCESS" else CommandStatus.FAILED
         
+        now = datetime.now(timezone.utc)
+
         update_data = {
             "status": final_status,
             "output": output,
-            "error_code": error_code if final_status == CommandStatus.FAILED else None
+            "error_code": error_code if final_status == CommandStatus.FAILED else None,
+            "finished_at": now,
         }
+
+        if getattr(command, "dispatched_at", None) is None:
+            update_data["dispatched_at"] = now
+
+        if getattr(command, "started_at", None) is None:
+            update_data["started_at"] = now
         
         await self.repository.update(command, update_data)
         await self.repository.session.commit()
