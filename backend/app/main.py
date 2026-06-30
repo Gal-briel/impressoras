@@ -26,6 +26,7 @@ from app.core.redis import redis_client
 from app.websocket.manager import websocket_manager
 from app.workers.rabbitmq import rabbitmq_client
 from app.workers.timeout_monitor import monitor_command_timeouts
+from app.api.routes import dashboard
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix=settings.API_V1_STR)
 app.include_router(agents.router, prefix=settings.API_V1_STR)
 app.include_router(commands.router, prefix=settings.API_V1_STR)
+app.include_router(dashboard.router, prefix=settings.API_V1_STR)
 app.include_router(printers.router, prefix=settings.API_V1_STR)
 app.include_router(agent_tags.router, prefix=settings.API_V1_STR)
 app.include_router(agent_groups.router, prefix=settings.API_V1_STR)
