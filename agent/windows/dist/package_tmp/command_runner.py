@@ -318,27 +318,137 @@ def clear_print_queue():
 
 
 
+
 def collect_hardware_inventory() -> dict[str, Any]:
     script = r"""
-$computer = Get-CimInstance Win32_ComputerSystem | Select-Object Manufacturer, Model, Name, Domain, TotalPhysicalMemory
-$bios = Get-CimInstance Win32_BIOS | Select-Object Manufacturer, SMBIOSBIOSVersion, SerialNumber, ReleaseDate
-$baseboard = Get-CimInstance Win32_BaseBoard | Select-Object Manufacturer, Product, SerialNumber
-$cpu = Get-CimInstance Win32_Processor | Select-Object Name, Manufacturer, NumberOfCores, NumberOfLogicalProcessors
-$disks = Get-CimInstance Win32_DiskDrive | Select-Object Model, SerialNumber, InterfaceType, MediaType, Size
-$gpus = Get-CimInstance Win32_VideoController | Select-Object Name, AdapterRAM, DriverVersion
-$net = Get-CimInstance Win32_NetworkAdapterConfiguration | Where-Object { $_.IPEnabled -eq $true } | Select-Object Description, MACAddress, IPAddress, DefaultIPGateway, DNSServerSearchOrder
+$ErrorActionPreference = "SilentlyContinue"
+
+$computer = Get-CimInstance Win32_ComputerSystem |
+    Select-Object Manufacturer, Model, Name, Domain, TotalPhysicalMemory, SystemType
+
+$bios = Get-CimInstance Win32_BIOS |
+    Select-Object Manufacturer, SMBIOSBIOSVersion, SerialNumber, ReleaseDate
+
+$baseboard = Get-CimInstance Win32_BaseBoard |
+    Select-Object Manufacturer, Product, SerialNumber
+
+$cpu = Get-CimInstance Win32_Processor |
+    Select-Object Name, Manufacturer, NumberOfCores, NumberOfLogicalProcessors, MaxClockSpeed, SocketDesignation
+
+$disks = Get-CimInstance Win32_DiskDrive | ForEach-Object {
+    [ordered]@{
+        friendly_name = $_.Model
+        model = $_.Model
+        serial_number = $_.SerialNumber
+        bus_type = $_.InterfaceType
+        media_type = $_.MediaType
+        size_gb = if ($_.Size) { [math]::Round($_.Size / 1GB, 2) } else { $null }
+        health_status = $_.Status
+    }
+}
+
+$volumes = Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | ForEach-Object {
+    $used = if ($_.Size -and $_.FreeSpace -ne $null) { $_.Size - $_.FreeSpace } else { $null }
+    [ordered]@{
+        drive_letter = $_.DeviceID
+        file_system = $_.FileSystem
+        file_system_label = $_.VolumeName
+        size_gb = if ($_.Size) { [math]::Round($_.Size / 1GB, 2) } else { $null }
+        free_gb = if ($_.FreeSpace -ne $null) { [math]::Round($_.FreeSpace / 1GB, 2) } else { $null }
+        used_gb = if ($used -ne $null) { [math]::Round($used / 1GB, 2) } else { $null }
+        percent = if ($_.Size -and $used -ne $null) { [math]::Round(($used / $_.Size) * 100, 2) } else { $null }
+        health_status = $null
+    }
+}
+
+$gpus = Get-CimInstance Win32_VideoController | ForEach-Object {
+    [ordered]@{
+        name = $_.Name
+        video_processor = $_.VideoProcessor
+        adapter_ram_gb = if ($_.AdapterRAM) { [math]::Round($_.AdapterRAM / 1GB, 2) } else { $null }
+        driver_version = $_.DriverVersion
+        status = $_.Status
+    }
+}
+
+$net = Get-CimInstance Win32_NetworkAdapterConfiguration | Where-Object { $_.IPEnabled -eq $true } | ForEach-Object {
+    [ordered]@{
+        name = $_.Description
+        interface_description = $_.Description
+        status = $null
+        mac_address = $_.MACAddress
+        ipv4 = if ($_.IPAddress) { ($_.IPAddress | Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+$' }) -join ", " } else { $null }
+        link_speed = $null
+        default_gateway = $_.DefaultIPGateway
+        dns_servers = $_.DNSServerSearchOrder
+    }
+}
+
+$memoryModules = Get-CimInstance Win32_PhysicalMemory | ForEach-Object {
+    [ordered]@{
+        device_locator = $_.DeviceLocator
+        manufacturer = $_.Manufacturer
+        capacity_gb = if ($_.Capacity) { [math]::Round($_.Capacity / 1GB, 2) } else { $null }
+        speed_mhz = $_.Speed
+        part_number = $_.PartNumber
+        serial_number = $_.SerialNumber
+    }
+}
+
+$tpmResult = [ordered]@{
+    present = $null
+    ready = $null
+    enabled = $null
+    activated = $null
+    manufacturer = $null
+    manufacturer_version = $null
+    error = $null
+}
+
+try {
+    $tpm = Get-Tpm
+    if ($null -ne $tpm) {
+        $tpmResult.present = $tpm.TpmPresent
+        $tpmResult.ready = $tpm.TpmReady
+        $tpmResult.enabled = $tpm.TpmEnabled
+        $tpmResult.activated = $tpm.TpmActivated
+        $tpmResult.manufacturer = $tpm.ManufacturerIdTxt
+        $tpmResult.manufacturer_version = $tpm.ManufacturerVersion
+    }
+} catch {
+    $tpmResult.error = $_.Exception.Message
+}
+
+$secureBootResult = [ordered]@{
+    enabled = $null
+    error = $null
+}
+
+try {
+    $secureBootResult.enabled = Confirm-SecureBootUEFI
+} catch {
+    $secureBootResult.error = $_.Exception.Message
+}
 
 $result = [ordered]@{
     computer = $computer
+    computer_system = $computer
     bios = $bios
     baseboard = $baseboard
     cpu = $cpu
-    disks = $disks
-    gpus = $gpus
-    network_adapters = $net
+    processors = @($cpu)
+    disks = @($disks)
+    physical_disks = @($disks)
+    volumes = @($volumes)
+    gpus = @($gpus)
+    video_controllers = @($gpus)
+    network_adapters = @($net)
+    memory_modules = @($memoryModules)
+    tpm = $tpmResult
+    secure_boot = $secureBootResult
 }
 
-$result | ConvertTo-Json -Depth 8
+$result | ConvertTo-Json -Depth 10
 """
 
     try:
@@ -361,6 +471,80 @@ $result | ConvertTo-Json -Depth 8
         }
 
 
+def collect_operational_metrics() -> dict[str, Any]:
+    script = r"""
+$ErrorActionPreference = "SilentlyContinue"
+
+$os = Get-CimInstance Win32_OperatingSystem
+$cpuRows = Get-CimInstance Win32_Processor
+
+$cpuPercent = ($cpuRows | Measure-Object -Property LoadPercentage -Average).Average
+
+$totalMemoryBytes = [double]$os.TotalVisibleMemorySize * 1KB
+$availableMemoryBytes = [double]$os.FreePhysicalMemory * 1KB
+$usedMemoryBytes = $totalMemoryBytes - $availableMemoryBytes
+
+$boot = [System.Management.ManagementDateTimeConverter]::ToDateTime($os.LastBootUpTime)
+$now = Get-Date
+$uptimeSeconds = [int](New-TimeSpan -Start $boot -End $now).TotalSeconds
+$bootEpoch = [int][double](Get-Date -Date $boot -UFormat %s)
+
+$logicalDisks = Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | ForEach-Object {
+    $usedBytes = if ($_.Size -and $_.FreeSpace -ne $null) { $_.Size - $_.FreeSpace } else { $null }
+
+    [ordered]@{
+        device = $_.DeviceID
+        mountpoint = "$($_.DeviceID)\"
+        fstype = $_.FileSystem
+        total_gb = if ($_.Size) { [math]::Round($_.Size / 1GB, 2) } else { $null }
+        used_gb = if ($usedBytes -ne $null) { [math]::Round($usedBytes / 1GB, 2) } else { $null }
+        free_gb = if ($_.FreeSpace -ne $null) { [math]::Round($_.FreeSpace / 1GB, 2) } else { $null }
+        percent = if ($_.Size -and $usedBytes -ne $null) { [math]::Round(($usedBytes / $_.Size) * 100, 2) } else { $null }
+    }
+}
+
+$result = [ordered]@{
+    cpu = [ordered]@{
+        percent = if ($cpuPercent -ne $null) { [math]::Round([double]$cpuPercent, 2) } else { $null }
+        count_physical = ($cpuRows | Measure-Object -Property NumberOfCores -Sum).Sum
+        count_logical = ($cpuRows | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
+    }
+    memory = [ordered]@{
+        total_gb = if ($totalMemoryBytes) { [math]::Round($totalMemoryBytes / 1GB, 2) } else { $null }
+        available_gb = if ($availableMemoryBytes -ne $null) { [math]::Round($availableMemoryBytes / 1GB, 2) } else { $null }
+        used_gb = if ($usedMemoryBytes -ne $null) { [math]::Round($usedMemoryBytes / 1GB, 2) } else { $null }
+        percent = if ($totalMemoryBytes -and $usedMemoryBytes -ne $null) { [math]::Round(($usedMemoryBytes / $totalMemoryBytes) * 100, 2) } else { $null }
+    }
+    uptime = [ordered]@{
+        boot_time_epoch = $bootEpoch
+        uptime_seconds = $uptimeSeconds
+    }
+    disks = @($logicalDisks)
+}
+
+$result | ConvertTo-Json -Depth 8
+"""
+
+    try:
+        output = run_powershell(script, timeout=120)
+
+        if not output:
+            return {}
+
+        data = json.loads(output)
+
+        if isinstance(data, dict):
+            return data
+
+        return {}
+
+    except Exception as exc:
+        return {
+            "error": str(exc),
+            "warning": "Erro ao coletar métricas operacionais."
+        }
+
+
 def collect_diagnostics() -> CommandResult:
     try:
         printers = collect_printers()
@@ -376,6 +560,11 @@ def collect_diagnostics() -> CommandResult:
         hardware = {"error": str(exc)}
 
     try:
+        metrics = collect_operational_metrics()
+    except Exception as exc:
+        metrics = {"error": str(exc)}
+
+    try:
         hostname = socket.gethostname()
     except Exception:
         hostname = None
@@ -384,6 +573,14 @@ def collect_diagnostics() -> CommandResult:
         internal_ip = socket.gethostbyname(socket.gethostname())
     except Exception:
         internal_ip = None
+
+    if not internal_ip:
+        for adapter in hardware.get("network_adapters") or []:
+            ipv4 = adapter.get("ipv4")
+
+            if isinstance(ipv4, str) and ipv4:
+                internal_ip = ipv4.split(",", 1)[0].strip()
+                break
 
     try:
         spooler_status = run_powershell("(Get-Service -Name Spooler).Status | Out-String", timeout=30)
@@ -404,6 +601,10 @@ def collect_diagnostics() -> CommandResult:
         "network": {
             "internal_ip": internal_ip,
         },
+        "cpu": metrics.get("cpu"),
+        "memory": metrics.get("memory"),
+        "uptime": metrics.get("uptime"),
+        "disks": metrics.get("disks") or [],
         "spooler": {
             "status": spooler_status,
         },
@@ -413,6 +614,7 @@ def collect_diagnostics() -> CommandResult:
             "items": printers,
         },
         "hardware": hardware,
+        "metrics": metrics,
     }
 
     return CommandResult(
@@ -420,7 +622,6 @@ def collect_diagnostics() -> CommandResult:
         output=output,
         printers=printers,
     )
-
 
 
 def execute_command(command_type: str, payload: dict[str, Any]) -> CommandResult:
