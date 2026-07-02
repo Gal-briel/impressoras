@@ -1408,22 +1408,27 @@ def collect_software_inventory(payload: dict[str, Any] | None = None) -> Command
 
     limit = _safe_int(payload.get("limit"), default=500, minimum=1, maximum=3000)
     search = str(payload.get("search") or "").strip()
+    include_store_apps = bool(payload.get("include_store_apps", False))
+
     search_ps = search.replace("'", "''")
+    include_store_apps_ps = "$true" if include_store_apps else "$false"
 
     script = f"""
 $ErrorActionPreference = "SilentlyContinue"
 
 $Search = '{search_ps}'
 $Limit = {limit}
+$IncludeStoreApps = {include_store_apps_ps}
+
+$items = @()
 
 $registryPaths = @(
     'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',
-    'HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',
-    'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'
+    'HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'
 )
 
-$items = foreach ($path in $registryPaths) {{
-    Get-ItemProperty -Path $path -ErrorAction SilentlyContinue |
+foreach ($path in $registryPaths) {{
+    $items += Get-ItemProperty -Path $path -ErrorAction SilentlyContinue |
         Where-Object {{ $_.DisplayName }} |
         ForEach-Object {{
             [ordered]@{{
@@ -1435,35 +1440,128 @@ $items = foreach ($path in $registryPaths) {{
                 install_location = $_.InstallLocation
                 uninstall_string = $_.UninstallString
                 registry_key = $_.PSChildName
-                registry_source = $path
+                source = 'machine_registry'
+                user_sid = $null
             }}
         }}
+}}
+
+$userUninstallRoots = Get-ChildItem Registry::HKEY_USERS -ErrorAction SilentlyContinue |
+    Where-Object {{
+        $_.Name -match 'S-1-5-21-' -and
+        $_.Name -notmatch '_Classes$'
+    }}
+
+foreach ($root in $userUninstallRoots) {{
+    $sid = Split-Path $root.Name -Leaf
+
+    $userPaths = @(
+        "Registry::$($root.Name)\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*",
+        "Registry::$($root.Name)\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*"
+    )
+
+    foreach ($path in $userPaths) {{
+        $items += Get-ItemProperty -Path $path -ErrorAction SilentlyContinue |
+            Where-Object {{ $_.DisplayName }} |
+            ForEach-Object {{
+                [ordered]@{{
+                    name = $_.DisplayName
+                    version = $_.DisplayVersion
+                    publisher = $_.Publisher
+                    install_date = $_.InstallDate
+                    estimated_size_mb = if ($_.EstimatedSize) {{ [math]::Round([double]$_.EstimatedSize / 1024, 2) }} else {{ $null }}
+                    install_location = $_.InstallLocation
+                    uninstall_string = $_.UninstallString
+                    registry_key = $_.PSChildName
+                    source = 'user_registry'
+                    user_sid = $sid
+                }}
+            }}
+    }}
+}}
+
+try {{
+    $packageItems = Get-Package -ErrorAction SilentlyContinue |
+        Where-Object {{ $_.Name }} |
+        ForEach-Object {{
+            [ordered]@{{
+                name = $_.Name
+                version = if ($_.Version) {{ [string]$_.Version }} else {{ $null }}
+                publisher = $_.ProviderName
+                install_date = $null
+                estimated_size_mb = $null
+                install_location = $null
+                uninstall_string = $null
+                registry_key = $null
+                source = 'package_provider'
+                user_sid = $null
+            }}
+        }}
+
+    $items += $packageItems
+}} catch {{}}
+
+if ($IncludeStoreApps) {{
+    try {{
+        $storeApps = Get-AppxPackage -AllUsers -ErrorAction SilentlyContinue |
+            Where-Object {{ $_.Name }} |
+            Select-Object -First 500 |
+            ForEach-Object {{
+                [ordered]@{{
+                    name = $_.Name
+                    version = if ($_.Version) {{ [string]$_.Version }} else {{ $null }}
+                    publisher = $_.Publisher
+                    install_date = $null
+                    estimated_size_mb = $null
+                    install_location = $_.InstallLocation
+                    uninstall_string = $null
+                    registry_key = $_.PackageFullName
+                    source = 'appx_store'
+                    user_sid = $null
+                }}
+            }}
+
+        $items += $storeApps
+    }} catch {{}}
 }}
 
 if ($Search) {{
     $items = $items | Where-Object {{
         ($_.name -like "*$Search*") -or
         ($_.publisher -like "*$Search*") -or
-        ($_.version -like "*$Search*")
+        ($_.version -like "*$Search*") -or
+        ($_.source -like "*$Search*")
     }}
 }}
 
 $uniqueItems = $items |
-    Group-Object name, version, publisher |
+    Where-Object {{ $_.name }} |
+    Group-Object name, version, publisher, source |
     ForEach-Object {{ $_.Group[0] }} |
     Sort-Object name |
     Select-Object -First $Limit
+
+$bySource = @($uniqueItems) |
+    Group-Object source |
+    ForEach-Object {{
+        [ordered]@{{
+            source = $_.Name
+            count = $_.Count
+        }}
+    }}
 
 [ordered]@{{
     count = @($uniqueItems).Count
     limit = $Limit
     search = if ($Search) {{ $Search }} else {{ $null }}
+    include_store_apps = $IncludeStoreApps
+    sources = @($bySource)
     items = @($uniqueItems)
 }} | ConvertTo-Json -Depth 8
 """
 
     try:
-        output = run_powershell(script, timeout=180)
+        output = run_powershell(script, timeout=240)
         data = json.loads(output) if output else {"items": []}
 
         return CommandResult(

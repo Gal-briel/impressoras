@@ -4,6 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from app.api.routes import persisted_inventory
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import (
@@ -95,6 +96,8 @@ app.include_router(websockets.router, prefix=settings.API_V1_STR)
 # Rotas usadas diretamente pelo agente Windows 0.1.x
 app.include_router(agent_runtime.router, prefix=settings.API_V1_STR)
 app.include_router(agent_events.router, prefix=settings.API_V1_STR)
+
+app.include_router(persisted_inventory.router, prefix="/api/v1")
 
 configure_openapi(app)
 

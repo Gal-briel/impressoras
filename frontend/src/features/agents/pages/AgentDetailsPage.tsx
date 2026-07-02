@@ -16,6 +16,7 @@ import { AgentDiagnosticsSection } from '../components/AgentDiagnosticsSection';
 import { AgentInventorySection } from '../components/AgentInventorySection';
 import { AgentUpdateSection } from '../components/AgentUpdateSection';
 import { AgentAdminActionsSection } from '../components/AgentAdminActionsSection';
+import { AgentSecurityInventorySection } from '../components/AgentSecurityInventorySection';
 
 function PlaceholderTabContent({
   title,
@@ -114,6 +115,8 @@ export function AgentDetailsPage() {
         <AgentUpdateSection />
 
         <AgentAdminActionsSection agentId={agent.id} />
+
+        <AgentSecurityInventorySection agentId={agent.id} />
 
         <AgentInventorySection />
 
