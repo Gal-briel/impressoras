@@ -168,6 +168,11 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
 
   const queryClient = useQueryClient();
   const { notify } = useNotifications();
+  const notifyRef = useRef(notify);
+
+  useEffect(() => {
+    notifyRef.current = notify;
+  }, [notify]);
 
   const [status, setStatus] = useState<RealtimeConnectionStatus>('disabled');
   const [lastEvent, setLastEvent] = useState<RealtimeEvent | null>(null);
@@ -222,7 +227,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
 
         reconnectAttemptRef.current = 0;
         setStatus('connected');
-        notify({
+        notifyRef.current({
           type: 'success',
           title: 'Tempo real conectado',
           message: 'O painel está recebendo atualizações automaticamente.',
@@ -251,7 +256,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
           const notification = getEventNotification(event);
 
           if (notification) {
-            notify(notification);
+            notifyRef.current(notification);
           }
         } catch {
           // Ignora mensagens que não são JSON.
@@ -281,7 +286,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
         setStatus(reconnectAttemptRef.current > 1 ? 'reconnecting' : 'disconnected');
 
         if (reconnectAttemptRef.current === 1) {
-          notify({
+          notifyRef.current({
             type: 'warning',
             title: 'Tempo real desconectado',
             message: 'Tentando reconectar automaticamente.',
@@ -305,7 +310,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
         socketRef.current = null;
       }
     };
-  }, [token, queryClient, notify]);
+  }, [token, queryClient]);
 
   const value = useMemo(
     () => ({

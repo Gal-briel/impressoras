@@ -97,3 +97,86 @@ app.include_router(agent_runtime.router, prefix=settings.API_V1_STR)
 app.include_router(agent_events.router, prefix=settings.API_V1_STR)
 
 configure_openapi(app)
+
+
+# --- AGENT_PACKAGE_ROUTES_START ---
+from pathlib import Path as _AgentPackagePath
+
+from fastapi import HTTPException as _AgentPackageHTTPException
+from fastapi.responses import FileResponse as _AgentPackageFileResponse
+
+
+_AGENT_PACKAGE_DIST = _AgentPackagePath(__file__).resolve().parents[2] / "agent" / "windows" / "dist"
+
+
+@app.get("/agent-packages/{filename}", include_in_schema=False)
+async def _download_agent_package(filename: str):
+    if "/" in filename or "\\" in filename or ".." in filename:
+        raise _AgentPackageHTTPException(status_code=400, detail="Invalid package filename")
+
+    package_path = _AGENT_PACKAGE_DIST / filename
+
+    if not package_path.is_file():
+        raise _AgentPackageHTTPException(status_code=404, detail="Agent package not found")
+
+    return _AgentPackageFileResponse(
+        path=package_path,
+        filename=filename,
+        media_type="application/zip",
+    )
+# --- AGENT_PACKAGE_ROUTES_END ---
+
+
+# --- FRONTEND_STATIC_SERVING_START ---
+from pathlib import Path as _FrontendPath
+
+from fastapi import HTTPException as _FrontendHTTPException
+from fastapi.responses import FileResponse as _FrontendFileResponse
+from fastapi.staticfiles import StaticFiles as _FrontendStaticFiles
+
+
+_FRONTEND_DIST = _FrontendPath(__file__).resolve().parents[2] / "frontend" / "dist"
+
+_AGENT_DIST = _FrontendPath(__file__).resolve().parents[2] / "agent" / "windows" / "dist"
+
+if _AGENT_DIST.exists():
+    app.mount(
+        "/agent-packages",
+        _FrontendStaticFiles(directory=str(_AGENT_DIST)),
+        name="agent-packages",
+    )
+
+
+if _FRONTEND_DIST.exists():
+    _FRONTEND_ASSETS = _FRONTEND_DIST / "assets"
+
+    if _FRONTEND_ASSETS.exists():
+        app.mount(
+            "/assets",
+            _FrontendStaticFiles(directory=str(_FRONTEND_ASSETS)),
+            name="frontend-assets",
+        )
+
+    @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
+    async def _serve_frontend_index():
+        return _FrontendFileResponse(_FRONTEND_DIST / "index.html")
+
+    @app.api_route("/{full_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+    async def _serve_frontend_spa(full_path: str):
+        if (
+            full_path.startswith("api/")
+            or full_path == "docs"
+            or full_path.startswith("docs/")
+            or full_path == "redoc"
+            or full_path == "openapi.json"
+        ):
+            raise _FrontendHTTPException(status_code=404)
+
+        requested_file = _FRONTEND_DIST / full_path
+
+        if requested_file.is_file():
+            return _FrontendFileResponse(requested_file)
+
+        return _FrontendFileResponse(_FRONTEND_DIST / "index.html")
+# --- FRONTEND_STATIC_SERVING_END ---
+

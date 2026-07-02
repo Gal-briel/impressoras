@@ -100,7 +100,7 @@ export function AgentsTable({ agents }: AgentsTableProps) {
                 </td>
 
                 <td className="px-5 py-4 text-sm text-slate-600">
-                  {formatDate(agent.last_seen_at)}
+                  {formatDate(agent.last_seen || agent.last_seen_at)}
                 </td>
 
                 <td className="px-5 py-4 text-right">

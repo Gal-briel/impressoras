@@ -53,7 +53,7 @@ export function AgentInfoCard({ agent }: { agent: Agent }) {
         <InfoItem label="Versão do agente" value={agent.agent_version} />
         <InfoItem label="IP" value={agent.last_ip || agent.internal_ip || agent.external_ip} />
         <InfoItem label="MAC Address" value={agent.mac_address} />
-        <InfoItem label="Último check-in" value={formatDate(agent.last_seen_at)} />
+        <InfoItem label="Último check-in" value={formatDate(agent.last_seen || agent.last_seen_at)} />
         <InfoItem label="Status bruto" value={agent.status || agent.enrollment_status} />
         <InfoItem label="Tenant ID" value={agent.tenant_id} />
         <InfoItem label="Group ID" value={agent.group_id} />

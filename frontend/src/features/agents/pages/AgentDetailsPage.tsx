@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 
 import { Badge } from '../../../components/ui/Badge';
@@ -34,9 +35,33 @@ return (
 
 export function AgentDetailsPage() {
   const { id } = useParams();
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<TabKey>('general');
 
   const { data: agent, isLoading, isError, error, refetch, isFetching } = useAgent(id);
+
+  async function refreshAgentPage() {
+    if (!id) {
+      await refetch();
+      return;
+    }
+
+    await Promise.all([
+      refetch(),
+      queryClient.invalidateQueries({ queryKey: ['agents'] }),
+      queryClient.invalidateQueries({ queryKey: ['agents', id] }),
+      queryClient.invalidateQueries({ queryKey: ['agent-health', id] }),
+      queryClient.invalidateQueries({ queryKey: ['agent-diagnostics', id] }),
+      queryClient.invalidateQueries({ queryKey: ['agent-inventory', id] }),
+      queryClient.invalidateQueries({ queryKey: ['agents', id, 'events'] }),
+      queryClient.invalidateQueries({ queryKey: ['printers'] }),
+      queryClient.invalidateQueries({ queryKey: ['inventory-devices'] }),
+    ]);
+
+    await queryClient.refetchQueries({
+      type: 'active',
+    });
+  }
 
   return (
     <section>
@@ -53,7 +78,7 @@ export function AgentDetailsPage() {
             </Link>
 
             <button
-              onClick={() => refetch()}
+              onClick={refreshAgentPage}
               className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
             >
               {isFetching ? 'Atualizando...' : 'Atualizar'}

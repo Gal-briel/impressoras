@@ -84,6 +84,157 @@ function getCommandType(command: AgentCommandSummary) {
   return command.command_type || command.type || '';
 }
 
+function asArray(value: any): any[] {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'object') return [value];
+  return [];
+}
+
+function pick(source: any, ...keys: string[]) {
+  if (!source || typeof source !== 'object') return undefined;
+
+  for (const key of keys) {
+    if (source[key] !== undefined && source[key] !== null && source[key] !== '') {
+      return source[key];
+    }
+  }
+
+  return undefined;
+}
+
+function bytesToGb(value: any) {
+  const numberValue = Number(value);
+
+  if (!Number.isFinite(numberValue) || numberValue <= 0) return undefined;
+
+  return Number((numberValue / 1024 / 1024 / 1024).toFixed(2));
+}
+
+function normalizeHardware(rawHardware: any) {
+  if (!rawHardware || typeof rawHardware !== 'object') return rawHardware;
+
+  const computer = rawHardware.computer_system || rawHardware.computer || {};
+  const cpu = rawHardware.cpu || {};
+  const diskRows = asArray(rawHardware.physical_disks || rawHardware.disks);
+  const gpuRows = asArray(rawHardware.video_controllers || rawHardware.gpus);
+  const networkRows = asArray(rawHardware.network_adapters);
+
+  return {
+    ...rawHardware,
+
+    computer_system: {
+      ...computer,
+      manufacturer: pick(computer, 'manufacturer', 'Manufacturer'),
+      model: pick(computer, 'model', 'Model'),
+      name: pick(computer, 'name', 'Name'),
+      domain: pick(computer, 'domain', 'Domain'),
+      total_physical_memory_gb:
+        pick(computer, 'total_physical_memory_gb') ||
+        bytesToGb(pick(computer, 'TotalPhysicalMemory')),
+      system_type: pick(computer, 'system_type', 'SystemType'),
+    },
+
+    bios: {
+      ...(rawHardware.bios || {}),
+      manufacturer: pick(rawHardware.bios, 'manufacturer', 'Manufacturer'),
+      version: pick(rawHardware.bios, 'version', 'Version', 'SMBIOSBIOSVersion'),
+      serial_number: pick(rawHardware.bios, 'serial_number', 'SerialNumber'),
+      release_date: pick(rawHardware.bios, 'release_date', 'ReleaseDate'),
+    },
+
+    baseboard: {
+      ...(rawHardware.baseboard || {}),
+      manufacturer: pick(rawHardware.baseboard, 'manufacturer', 'Manufacturer'),
+      product: pick(rawHardware.baseboard, 'product', 'Product'),
+      version: pick(rawHardware.baseboard, 'version', 'Version'),
+      serial_number: pick(rawHardware.baseboard, 'serial_number', 'SerialNumber'),
+    },
+
+    processors: asArray(rawHardware.processors || cpu).map((item) => ({
+      ...item,
+      name: pick(item, 'name', 'Name'),
+      manufacturer: pick(item, 'manufacturer', 'Manufacturer'),
+      cores: pick(item, 'cores', 'NumberOfCores'),
+      logical_processors: pick(item, 'logical_processors', 'NumberOfLogicalProcessors'),
+      max_clock_mhz: pick(item, 'max_clock_mhz', 'MaxClockSpeed'),
+      socket_designation: pick(item, 'socket_designation', 'SocketDesignation'),
+    })),
+
+    physical_disks: diskRows.map((item) => ({
+      ...item,
+      friendly_name: pick(item, 'friendly_name', 'FriendlyName', 'Model'),
+      model: pick(item, 'model', 'Model'),
+      media_type: pick(item, 'media_type', 'MediaType'),
+      bus_type: pick(item, 'bus_type', 'BusType', 'InterfaceType'),
+      size_gb: pick(item, 'size_gb') || bytesToGb(pick(item, 'Size')),
+      health_status: pick(item, 'health_status', 'HealthStatus', 'Status'),
+      serial_number: pick(item, 'serial_number', 'SerialNumber'),
+    })),
+
+    video_controllers: gpuRows.map((item) => ({
+      ...item,
+      name: pick(item, 'name', 'Name'),
+      adapter_ram_gb: pick(item, 'adapter_ram_gb') || bytesToGb(pick(item, 'AdapterRAM')),
+      driver_version: pick(item, 'driver_version', 'DriverVersion'),
+      status: pick(item, 'status', 'Status'),
+      video_processor: pick(item, 'video_processor', 'VideoProcessor'),
+    })),
+
+    network_adapters: networkRows.map((item) => ({
+      ...item,
+      name: pick(item, 'name', 'Name', 'Description'),
+      interface_description: pick(item, 'interface_description', 'InterfaceDescription', 'Description'),
+      status: pick(item, 'status', 'Status'),
+      mac_address: pick(item, 'mac_address', 'MACAddress'),
+      ipv4: Array.isArray(item?.IPAddress)
+        ? item.IPAddress.join(', ')
+        : pick(item, 'ipv4', 'IPAddress'),
+      link_speed: pick(item, 'link_speed', 'Speed', 'LinkSpeed'),
+    })),
+  };
+}
+
+function normalizeDiagnostics(data: DiagnosticsData): DiagnosticsData {
+  const hardware = normalizeHardware(data.hardware);
+  const hardwareCpu = data.hardware?.cpu || {};
+  const hardwareComputer = data.hardware?.computer || data.hardware?.computer_system || {};
+  const hardwareDisks = asArray(data.hardware?.disks || data.hardware?.physical_disks);
+
+  return {
+    ...data,
+
+    cpu: data.cpu || {
+      count_physical: pick(hardwareCpu, 'count_physical', 'NumberOfCores'),
+      count_logical: pick(hardwareCpu, 'count_logical', 'NumberOfLogicalProcessors'),
+      percent: pick(hardwareCpu, 'percent'),
+    },
+
+    memory: data.memory || {
+      total_gb:
+        pick(hardwareComputer, 'total_physical_memory_gb') ||
+        bytesToGb(pick(hardwareComputer, 'TotalPhysicalMemory')),
+      available_gb: undefined,
+      used_gb: undefined,
+      percent: undefined,
+    },
+
+    disks:
+      data.disks ||
+      hardwareDisks.map((disk) => ({
+        device: pick(disk, 'device', 'DeviceID', 'Model'),
+        mountpoint: pick(disk, 'mountpoint', 'DriveLetter'),
+        fstype: pick(disk, 'fstype', 'FileSystem'),
+        total_gb: pick(disk, 'total_gb', 'size_gb') || bytesToGb(pick(disk, 'Size')),
+        used_gb: pick(disk, 'used_gb'),
+        free_gb: pick(disk, 'free_gb'),
+        percent: pick(disk, 'percent'),
+      })),
+
+    hardware,
+  };
+}
+
 function parseDiagnostics(command?: AgentCommandSummary): DiagnosticsData | undefined {
   if (!command) return undefined;
 
@@ -91,10 +242,10 @@ function parseDiagnostics(command?: AgentCommandSummary): DiagnosticsData | unde
 
   if (!raw) return undefined;
 
-  if (typeof raw !== 'string') return raw as DiagnosticsData;
+  if (typeof raw !== 'string') return normalizeDiagnostics(raw as DiagnosticsData);
 
   try {
-    return JSON.parse(raw) as DiagnosticsData;
+    return normalizeDiagnostics(JSON.parse(raw) as DiagnosticsData);
   } catch {
     return undefined;
   }

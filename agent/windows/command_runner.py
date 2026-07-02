@@ -55,6 +55,30 @@ def run_powershell(script: str, timeout: int = 120) -> str:
     return completed.stdout.strip()
 
 
+
+
+def _clean_json_value(value: Any) -> Any:
+    """Remove caracteres problemáticos antes de enviar JSON ao backend/PostgreSQL."""
+    if isinstance(value, str):
+        return (
+            value
+            .replace("\x00", "")
+            .replace("\u0000", "")
+            .strip()
+        )
+
+    if isinstance(value, list):
+        return [_clean_json_value(item) for item in value]
+
+    if isinstance(value, dict):
+        return {
+            _clean_json_value(key): _clean_json_value(item)
+            for key, item in value.items()
+        }
+
+    return value
+
+
 def get_printer_name(payload: dict[str, Any]) -> str:
     printer_name = payload.get("printer_name") or payload.get("name")
 
@@ -319,36 +343,140 @@ def clear_print_queue():
 
 
 
+
 def collect_hardware_inventory() -> dict[str, Any]:
     script = r"""
 $ErrorActionPreference = "SilentlyContinue"
 
 $computer = Get-CimInstance Win32_ComputerSystem |
-    Select-Object Manufacturer, Model, Name, Domain, TotalPhysicalMemory, SystemType
+    Select-Object Manufacturer, Model, Name, Domain, TotalPhysicalMemory, SystemType, HypervisorPresent
 
 $bios = Get-CimInstance Win32_BIOS |
     Select-Object Manufacturer, SMBIOSBIOSVersion, SerialNumber, ReleaseDate
 
 $baseboard = Get-CimInstance Win32_BaseBoard |
-    Select-Object Manufacturer, Product, SerialNumber
+    Select-Object Manufacturer, Product, Version, SerialNumber
 
 $cpu = Get-CimInstance Win32_Processor |
-    Select-Object Name, Manufacturer, NumberOfCores, NumberOfLogicalProcessors, MaxClockSpeed, SocketDesignation
+    Select-Object Name, Manufacturer, NumberOfCores, NumberOfLogicalProcessors, MaxClockSpeed, SocketDesignation, VirtualizationFirmwareEnabled, VMMonitorModeExtensions, SecondLevelAddressTranslationExtensions
+
+$virtualization = [ordered]@{
+    hypervisor_present = $computer.HypervisorPresent
+    firmware_enabled = $null
+    vm_monitor_mode_extensions = $null
+    second_level_address_translation = $null
+}
+
+if ($cpu) {
+    $firstCpu = @($cpu)[0]
+    $virtualization.firmware_enabled = $firstCpu.VirtualizationFirmwareEnabled
+    $virtualization.vm_monitor_mode_extensions = $firstCpu.VMMonitorModeExtensions
+    $virtualization.second_level_address_translation = $firstCpu.SecondLevelAddressTranslationExtensions
+}
+
+$netAdapterByMac = @{}
+try {
+    Get-NetAdapter | ForEach-Object {
+        $mac = if ($_.MacAddress) { $_.MacAddress.Replace("-", ":").ToUpperInvariant() } else { $null }
+        if ($mac) {
+            $netAdapterByMac[$mac] = $_
+        }
+    }
+} catch {}
+
+$net = Get-CimInstance Win32_NetworkAdapterConfiguration |
+    Where-Object { $_.IPEnabled -eq $true } |
+    ForEach-Object {
+        $macNormalized = if ($_.MACAddress) { $_.MACAddress.Replace("-", ":").ToUpperInvariant() } else { $null }
+        $adapter = if ($macNormalized -and $netAdapterByMac.ContainsKey($macNormalized)) { $netAdapterByMac[$macNormalized] } else { $null }
+
+        [ordered]@{
+            name = if ($adapter) { $adapter.Name } else { $_.Description }
+            interface_description = $_.Description
+            status = if ($adapter) { [string]$adapter.Status } else { $null }
+            mac_address = $_.MACAddress
+            ipv4 = if ($_.IPAddress) { ($_.IPAddress | Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+$' }) -join ", " } else { $null }
+            link_speed = if ($adapter) { [string]$adapter.LinkSpeed } else { $null }
+            media_connection_state = if ($adapter) { [string]$adapter.MediaConnectionState } else { $null }
+            interface_index = if ($adapter) { $adapter.ifIndex } else { $null }
+            default_gateway = $_.DefaultIPGateway
+            dns_servers = $_.DNSServerSearchOrder
+            dhcp_enabled = $_.DHCPEnabled
+            dhcp_server = $_.DHCPServer
+        }
+    }
+
+$physicalDiskMap = @{}
+try {
+    Get-PhysicalDisk | ForEach-Object {
+        $key = if ($_.SerialNumber) { $_.SerialNumber.Trim() } else { $_.FriendlyName }
+        if ($key) {
+            $physicalDiskMap[$key] = $_
+        }
+    }
+} catch {}
+
+$reliabilityByDeviceId = @{}
+try {
+    Get-PhysicalDisk | Get-StorageReliabilityCounter | ForEach-Object {
+        if ($_.DeviceId -ne $null) {
+            $reliabilityByDeviceId[[string]$_.DeviceId] = $_
+        }
+    }
+} catch {}
+
+$smartStatus = @()
+try {
+    $smartStatus = Get-CimInstance -Namespace root\wmi -ClassName MSStorageDriver_FailurePredictStatus |
+        ForEach-Object {
+            [ordered]@{
+                instance_name = $_.InstanceName
+                predict_failure = $_.PredictFailure
+                reason = $_.Reason
+            }
+        }
+} catch {}
 
 $disks = Get-CimInstance Win32_DiskDrive | ForEach-Object {
+    $serial = if ($_.SerialNumber) { $_.SerialNumber.Trim() } else { $null }
+    $physical = $null
+
+    if ($serial -and $physicalDiskMap.ContainsKey($serial)) {
+        $physical = $physicalDiskMap[$serial]
+    } elseif ($physicalDiskMap.ContainsKey($_.Model)) {
+        $physical = $physicalDiskMap[$_.Model]
+    }
+
+    $reliability = $null
+    if ($physical -and $physical.DeviceId -ne $null) {
+        $deviceKey = [string]$physical.DeviceId
+        if ($reliabilityByDeviceId.ContainsKey($deviceKey)) {
+            $reliability = $reliabilityByDeviceId[$deviceKey]
+        }
+    }
+
     [ordered]@{
-        friendly_name = $_.Model
+        friendly_name = if ($physical) { $physical.FriendlyName } else { $_.Model }
         model = $_.Model
         serial_number = $_.SerialNumber
-        bus_type = $_.InterfaceType
-        media_type = $_.MediaType
+        bus_type = if ($physical) { [string]$physical.BusType } else { $_.InterfaceType }
+        media_type = if ($physical) { [string]$physical.MediaType } else { $_.MediaType }
         size_gb = if ($_.Size) { [math]::Round($_.Size / 1GB, 2) } else { $null }
-        health_status = $_.Status
+        health_status = if ($physical) { [string]$physical.HealthStatus } else { $_.Status }
+        operational_status = if ($physical) { ($physical.OperationalStatus -join ", ") } else { $null }
+        usage = if ($physical) { [string]$physical.Usage } else { $null }
+        firmware_version = if ($physical) { $physical.FirmwareVersion } else { $null }
+        temperature_celsius = if ($reliability) { $reliability.Temperature } else { $null }
+        wear = if ($reliability) { $reliability.Wear } else { $null }
+        read_errors_total = if ($reliability) { $reliability.ReadErrorsTotal } else { $null }
+        write_errors_total = if ($reliability) { $reliability.WriteErrorsTotal } else { $null }
+        power_on_hours = if ($reliability) { $reliability.PowerOnHours } else { $null }
     }
 }
 
 $volumes = Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | ForEach-Object {
     $used = if ($_.Size -and $_.FreeSpace -ne $null) { $_.Size - $_.FreeSpace } else { $null }
+
     [ordered]@{
         drive_letter = $_.DeviceID
         file_system = $_.FileSystem
@@ -357,7 +485,6 @@ $volumes = Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | ForEach-Obj
         free_gb = if ($_.FreeSpace -ne $null) { [math]::Round($_.FreeSpace / 1GB, 2) } else { $null }
         used_gb = if ($used -ne $null) { [math]::Round($used / 1GB, 2) } else { $null }
         percent = if ($_.Size -and $used -ne $null) { [math]::Round(($used / $_.Size) * 100, 2) } else { $null }
-        health_status = $null
     }
 }
 
@@ -368,19 +495,6 @@ $gpus = Get-CimInstance Win32_VideoController | ForEach-Object {
         adapter_ram_gb = if ($_.AdapterRAM) { [math]::Round($_.AdapterRAM / 1GB, 2) } else { $null }
         driver_version = $_.DriverVersion
         status = $_.Status
-    }
-}
-
-$net = Get-CimInstance Win32_NetworkAdapterConfiguration | Where-Object { $_.IPEnabled -eq $true } | ForEach-Object {
-    [ordered]@{
-        name = $_.Description
-        interface_description = $_.Description
-        status = $null
-        mac_address = $_.MACAddress
-        ipv4 = if ($_.IPAddress) { ($_.IPAddress | Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+$' }) -join ", " } else { $null }
-        link_speed = $null
-        default_gateway = $_.DefaultIPGateway
-        dns_servers = $_.DNSServerSearchOrder
     }
 }
 
@@ -437,9 +551,11 @@ $result = [ordered]@{
     baseboard = $baseboard
     cpu = $cpu
     processors = @($cpu)
+    virtualization = $virtualization
     disks = @($disks)
     physical_disks = @($disks)
     volumes = @($volumes)
+    smart_status = @($smartStatus)
     gpus = @($gpus)
     video_controllers = @($gpus)
     network_adapters = @($net)
@@ -448,11 +564,11 @@ $result = [ordered]@{
     secure_boot = $secureBootResult
 }
 
-$result | ConvertTo-Json -Depth 10
+$result | ConvertTo-Json -Depth 12
 """
 
     try:
-        output = run_powershell(script, timeout=120)
+        output = run_powershell(script, timeout=180)
 
         if not output:
             return {}
@@ -484,10 +600,32 @@ $totalMemoryBytes = [double]$os.TotalVisibleMemorySize * 1KB
 $availableMemoryBytes = [double]$os.FreePhysicalMemory * 1KB
 $usedMemoryBytes = $totalMemoryBytes - $availableMemoryBytes
 
-$boot = [System.Management.ManagementDateTimeConverter]::ToDateTime($os.LastBootUpTime)
+$bootRaw = $os.LastBootUpTime
+
+if ($bootRaw -is [datetime]) {
+    $boot = $bootRaw
+} else {
+    try {
+        $boot = [System.Management.ManagementDateTimeConverter]::ToDateTime([string]$bootRaw)
+    } catch {
+        $boot = $null
+    }
+}
+
 $now = Get-Date
-$uptimeSeconds = [int](New-TimeSpan -Start $boot -End $now).TotalSeconds
-$bootEpoch = [int][double](Get-Date -Date $boot -UFormat %s)
+
+if ($boot) {
+    $uptimeSeconds = [int][math]::Floor(($now - $boot).TotalSeconds)
+    $bootEpoch = [int][math]::Floor(($boot.ToUniversalTime() - [datetime]'1970-01-01').TotalSeconds)
+    $uptimeText = ("{0}d {1}h {2}m" -f `
+        [int][math]::Floor($uptimeSeconds / 86400), `
+        [int][math]::Floor(($uptimeSeconds % 86400) / 3600), `
+        [int][math]::Floor(($uptimeSeconds % 3600) / 60))
+} else {
+    $uptimeSeconds = $null
+    $bootEpoch = $null
+    $uptimeText = $null
+}
 
 $logicalDisks = Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" | ForEach-Object {
     $usedBytes = if ($_.Size -and $_.FreeSpace -ne $null) { $_.Size - $_.FreeSpace } else { $null }
@@ -518,6 +656,8 @@ $result = [ordered]@{
     uptime = [ordered]@{
         boot_time_epoch = $bootEpoch
         uptime_seconds = $uptimeSeconds
+        boot_time = if ($boot) { $boot.ToString("yyyy-MM-dd HH:mm:ss") } else { $null }
+        text = $uptimeText
     }
     disks = @($logicalDisks)
 }
@@ -545,6 +685,63 @@ $result | ConvertTo-Json -Depth 8
         }
 
 
+def _pick_primary_adapter(hardware: dict[str, Any]) -> dict[str, Any] | None:
+    adapters = hardware.get("network_adapters") or []
+
+    if not isinstance(adapters, list):
+        return None
+
+    ignored_terms = [
+        "vpn",
+        "virtual",
+        "loopback",
+        "tap",
+        "fortinet",
+        "bluetooth",
+        "hyper-v",
+        "wan miniport",
+    ]
+
+    def has_ipv4(adapter: dict[str, Any]) -> bool:
+        return bool(adapter.get("ipv4"))
+
+    def has_gateway(adapter: dict[str, Any]) -> bool:
+        gateway = adapter.get("default_gateway")
+        return bool(gateway)
+
+    def is_physical(adapter: dict[str, Any]) -> bool:
+        text = " ".join(
+            str(adapter.get(key) or "")
+            for key in ["name", "interface_description"]
+        ).lower()
+
+        return not any(term in text for term in ignored_terms)
+
+    candidates = [
+        adapter
+        for adapter in adapters
+        if isinstance(adapter, dict) and has_ipv4(adapter) and has_gateway(adapter) and is_physical(adapter)
+    ]
+
+    if candidates:
+        return candidates[0]
+
+    candidates = [
+        adapter
+        for adapter in adapters
+        if isinstance(adapter, dict) and has_ipv4(adapter) and is_physical(adapter)
+    ]
+
+    if candidates:
+        return candidates[0]
+
+    for adapter in adapters:
+        if isinstance(adapter, dict) and has_ipv4(adapter):
+            return adapter
+
+    return None
+
+
 def collect_diagnostics() -> CommandResult:
     try:
         printers = collect_printers()
@@ -569,18 +766,21 @@ def collect_diagnostics() -> CommandResult:
     except Exception:
         hostname = None
 
-    try:
-        internal_ip = socket.gethostbyname(socket.gethostname())
-    except Exception:
-        internal_ip = None
+    primary_adapter = _pick_primary_adapter(hardware)
+
+    internal_ip = None
+
+    if primary_adapter:
+        ipv4 = primary_adapter.get("ipv4")
+
+        if isinstance(ipv4, str) and ipv4:
+            internal_ip = ipv4.split(",", 1)[0].strip()
 
     if not internal_ip:
-        for adapter in hardware.get("network_adapters") or []:
-            ipv4 = adapter.get("ipv4")
-
-            if isinstance(ipv4, str) and ipv4:
-                internal_ip = ipv4.split(",", 1)[0].strip()
-                break
+        try:
+            internal_ip = socket.gethostbyname(socket.gethostname())
+        except Exception:
+            internal_ip = None
 
     try:
         spooler_status = run_powershell("(Get-Service -Name Spooler).Status | Out-String", timeout=30)
@@ -600,6 +800,12 @@ def collect_diagnostics() -> CommandResult:
         },
         "network": {
             "internal_ip": internal_ip,
+            "mac_address": primary_adapter.get("mac_address") if primary_adapter else None,
+            "adapter_name": primary_adapter.get("name") if primary_adapter else None,
+            "interface_description": primary_adapter.get("interface_description") if primary_adapter else None,
+            "status": primary_adapter.get("status") if primary_adapter else None,
+            "link_speed": primary_adapter.get("link_speed") if primary_adapter else None,
+            "media_connection_state": primary_adapter.get("media_connection_state") if primary_adapter else None,
         },
         "cpu": metrics.get("cpu"),
         "memory": metrics.get("memory"),
@@ -616,6 +822,9 @@ def collect_diagnostics() -> CommandResult:
         "hardware": hardware,
         "metrics": metrics,
     }
+
+    output = _clean_json_value(output)
+    printers = _clean_json_value(printers)
 
     return CommandResult(
         success=True,

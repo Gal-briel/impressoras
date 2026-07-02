@@ -182,20 +182,198 @@ async def _get_latest_diagnostics_command(
     return None
 
 
+
+def _pick_value(source: Any, *names: str, default=None):
+    if not isinstance(source, dict):
+        return default
+
+    for name in names:
+        value = source.get(name)
+        if value not in (None, ""):
+            return value
+
+    lowered = {str(key).lower(): value for key, value in source.items()}
+
+    for name in names:
+        value = lowered.get(str(name).lower())
+        if value not in (None, ""):
+            return value
+
+    return default
+
+
+def _bytes_to_gb(value: Any):
+    try:
+        number_value = float(value)
+    except (TypeError, ValueError):
+        return None
+
+    if number_value <= 0:
+        return None
+
+    return round(number_value / 1024 / 1024 / 1024, 2)
+
+
+def _first_ip(value: Any):
+    if isinstance(value, list):
+        return value[0] if value else None
+
+    if isinstance(value, str):
+        if "," in value:
+            return value.split(",", 1)[0].strip()
+        return value
+
+    return None
+
+
+def _normalize_processor_rows(value: Any) -> list[dict]:
+    rows = []
+
+    for item in _normalize_list(value):
+        if not isinstance(item, dict):
+            continue
+
+        rows.append({
+            **item,
+            "name": _pick_value(item, "name", "Name"),
+            "manufacturer": _pick_value(item, "manufacturer", "Manufacturer"),
+            "cores": _pick_value(item, "cores", "NumberOfCores"),
+            "logical_processors": _pick_value(
+                item,
+                "logical_processors",
+                "NumberOfLogicalProcessors",
+            ),
+            "max_clock_mhz": _pick_value(item, "max_clock_mhz", "MaxClockSpeed"),
+            "socket_designation": _pick_value(
+                item,
+                "socket_designation",
+                "SocketDesignation",
+            ),
+        })
+
+    return rows
+
+
+def _normalize_disk_rows(value: Any) -> list[dict]:
+    rows = []
+
+    for item in _normalize_list(value):
+        if not isinstance(item, dict):
+            continue
+
+        size_gb = (
+            _pick_value(item, "size_gb")
+            or _bytes_to_gb(_pick_value(item, "Size", "size"))
+        )
+
+        rows.append({
+            **item,
+            "friendly_name": _pick_value(
+                item,
+                "friendly_name",
+                "FriendlyName",
+                "Model",
+                "model",
+            ),
+            "model": _pick_value(item, "model", "Model"),
+            "media_type": _pick_value(item, "media_type", "MediaType"),
+            "bus_type": _pick_value(item, "bus_type", "BusType", "InterfaceType"),
+            "size_gb": size_gb,
+            "health_status": _pick_value(item, "health_status", "HealthStatus", "Status"),
+            "serial_number": _pick_value(item, "serial_number", "SerialNumber"),
+        })
+
+    return rows
+
+
+def _normalize_video_rows(value: Any) -> list[dict]:
+    rows = []
+
+    for item in _normalize_list(value):
+        if not isinstance(item, dict):
+            continue
+
+        rows.append({
+            **item,
+            "name": _pick_value(item, "name", "Name"),
+            "video_processor": _pick_value(item, "video_processor", "VideoProcessor"),
+            "adapter_ram_gb": (
+                _pick_value(item, "adapter_ram_gb")
+                or _bytes_to_gb(_pick_value(item, "AdapterRAM"))
+            ),
+            "driver_version": _pick_value(item, "driver_version", "DriverVersion"),
+            "status": _pick_value(item, "status", "Status"),
+        })
+
+    return rows
+
+
+def _normalize_network_rows(value: Any) -> list[dict]:
+    rows = []
+
+    for item in _normalize_list(value):
+        if not isinstance(item, dict):
+            continue
+
+        ip_value = _pick_value(item, "ipv4", "IPAddress", "IPAddresses")
+
+        rows.append({
+            **item,
+            "name": _pick_value(item, "name", "Name", "Description"),
+            "interface_description": _pick_value(
+                item,
+                "interface_description",
+                "InterfaceDescription",
+                "Description",
+            ),
+            "status": _pick_value(item, "status", "Status"),
+            "mac_address": _pick_value(item, "mac_address", "MACAddress"),
+            "ipv4": ", ".join(ip_value) if isinstance(ip_value, list) else ip_value,
+            "link_speed": _pick_value(item, "link_speed", "LinkSpeed", "Speed"),
+        })
+
+    return rows
+
+
 def _extract_inventory_from_diagnostics(
     diagnostics: dict,
     source_command_id: UUID | None = None,
 ) -> dict:
     hardware = diagnostics.get("hardware") or {}
 
-    computer = hardware.get("computer_system") or {}
+    computer = (
+        hardware.get("computer_system")
+        or hardware.get("computer")
+        or {}
+    )
     bios = hardware.get("bios") or {}
-    processors = _normalize_list(hardware.get("processors"))
+    baseboard = hardware.get("baseboard") or {}
+
+    processors = _normalize_processor_rows(
+        hardware.get("processors")
+        or hardware.get("cpu")
+        or diagnostics.get("cpu")
+    )
+
     memory_modules = _normalize_list(hardware.get("memory_modules"))
-    physical_disks = _normalize_list(hardware.get("physical_disks"))
-    volumes = _normalize_list(hardware.get("volumes"))
-    network_adapters = _normalize_list(hardware.get("network_adapters"))
-    video_controllers = _normalize_list(hardware.get("video_controllers"))
+
+    physical_disks = _normalize_disk_rows(
+        hardware.get("physical_disks")
+        or hardware.get("disks")
+        or diagnostics.get("disks")
+    )
+
+    volumes = _normalize_disk_rows(hardware.get("volumes"))
+
+    network_adapters = _normalize_network_rows(
+        hardware.get("network_adapters")
+        or diagnostics.get("network_adapters")
+    )
+
+    video_controllers = _normalize_video_rows(
+        hardware.get("video_controllers")
+        or hardware.get("gpus")
+    )
 
     os_info = diagnostics.get("os") or {}
     memory_info = diagnostics.get("memory") or {}
@@ -208,18 +386,28 @@ def _extract_inventory_from_diagnostics(
 
     first_processor = processors[0] if processors else {}
 
-    processor_name = first_processor.get("name") or os_info.get("processor")
-    cpu_cores = first_processor.get("cores") or cpu_info.get("count_physical")
-    cpu_threads = first_processor.get("logical_processors") or cpu_info.get("count_logical")
+    processor_name = (
+        _pick_value(first_processor, "name", "Name")
+        or _pick_value(cpu_info, "name", "Name")
+        or os_info.get("processor")
+    )
+
+    cpu_cores = (
+        _pick_value(first_processor, "cores", "NumberOfCores")
+        or _pick_value(cpu_info, "count_physical", "cores", "NumberOfCores")
+    )
+
+    cpu_threads = (
+        _pick_value(first_processor, "logical_processors", "NumberOfLogicalProcessors")
+        or _pick_value(cpu_info, "count_logical", "logical_processors", "NumberOfLogicalProcessors")
+    )
 
     primary_ip = network_info.get("internal_ip")
 
     if not primary_ip:
         for adapter in network_adapters:
-            ips = adapter.get("ipv4")
-
-            if isinstance(ips, list) and ips:
-                primary_ip = ips[0]
+            primary_ip = _first_ip(adapter.get("ipv4") or adapter.get("IPAddress"))
+            if primary_ip:
                 break
 
     os_name = " ".join(
@@ -230,32 +418,77 @@ def _extract_inventory_from_diagnostics(
 
     disks = physical_disks if physical_disks else volumes
 
+    manufacturer = _pick_value(computer, "manufacturer", "Manufacturer")
+    model = _pick_value(computer, "model", "Model")
+
+    serial_number = (
+        _pick_value(bios, "serial_number", "SerialNumber")
+        or _pick_value(baseboard, "serial_number", "SerialNumber")
+    )
+
+    ram_total_gb = (
+        _pick_value(computer, "total_physical_memory_gb")
+        or _bytes_to_gb(_pick_value(computer, "TotalPhysicalMemory"))
+        or memory_info.get("total_gb")
+    )
+
+    normalized_hardware = {
+        **hardware,
+        "computer_system": {
+            **computer,
+            "manufacturer": manufacturer,
+            "model": model,
+            "name": _pick_value(computer, "name", "Name"),
+            "domain": _pick_value(computer, "domain", "Domain"),
+            "total_physical_memory_gb": ram_total_gb,
+            "system_type": _pick_value(computer, "system_type", "SystemType"),
+        },
+        "bios": {
+            **bios,
+            "manufacturer": _pick_value(bios, "manufacturer", "Manufacturer"),
+            "version": _pick_value(bios, "version", "Version", "SMBIOSBIOSVersion"),
+            "serial_number": _pick_value(bios, "serial_number", "SerialNumber"),
+            "release_date": _pick_value(bios, "release_date", "ReleaseDate"),
+        },
+        "baseboard": {
+            **baseboard,
+            "manufacturer": _pick_value(baseboard, "manufacturer", "Manufacturer"),
+            "product": _pick_value(baseboard, "product", "Product"),
+            "version": _pick_value(baseboard, "version", "Version"),
+            "serial_number": _pick_value(baseboard, "serial_number", "SerialNumber"),
+        },
+        "processors": processors,
+        "physical_disks": physical_disks,
+        "video_controllers": video_controllers,
+        "network_adapters": network_adapters,
+    }
+
     return {
         "source_command_id": str(source_command_id) if source_command_id else None,
 
-        "hostname": diagnostics.get("hostname") or computer.get("name"),
-        "domain_name": diagnostics.get("domain") or computer.get("domain"),
-        "logged_user": diagnostics.get("user") or computer.get("username"),
+        "hostname": diagnostics.get("hostname") or _pick_value(computer, "name", "Name"),
+        "domain_name": diagnostics.get("domain") or _pick_value(computer, "domain", "Domain"),
+        "logged_user": diagnostics.get("user") or _pick_value(computer, "username", "UserName"),
 
-        "manufacturer": computer.get("manufacturer"),
-        "model": computer.get("model"),
-        "serial_number": bios.get("serial_number"),
+        "manufacturer": manufacturer,
+        "model": model,
+        "serial_number": serial_number,
 
         "os_name": os_name,
         "os_version": os_info.get("version"),
         "os_build": os_info.get("version"),
-        "architecture": os_info.get("machine") or computer.get("system_type"),
+        "architecture": os_info.get("machine") or _pick_value(computer, "system_type", "SystemType"),
 
         "processor_name": processor_name,
         "cpu_cores": cpu_cores,
         "cpu_threads": cpu_threads,
 
-        "ram_total_gb": computer.get("total_physical_memory_gb") or memory_info.get("total_gb"),
+        "ram_total_gb": ram_total_gb,
         "primary_ip": primary_ip,
 
-        "tpm_present": tpm.get("present"),
-        "tpm_ready": tpm.get("ready"),
-        "secure_boot_enabled": secure_boot.get("enabled"),
+        "tpm_present": _pick_value(tpm, "present", "Present"),
+        "tpm_ready": _pick_value(tpm, "ready", "Ready"),
+        "secure_boot_enabled": _pick_value(secure_boot, "enabled", "Enabled"),
 
         "disks": disks,
         "memory_modules": memory_modules,
@@ -263,7 +496,7 @@ def _extract_inventory_from_diagnostics(
         "video_controllers": video_controllers,
         "printers": printers_info.get("items") or [],
 
-        "hardware": hardware,
+        "hardware": normalized_hardware,
         "raw_diagnostics": diagnostics,
     }
 
