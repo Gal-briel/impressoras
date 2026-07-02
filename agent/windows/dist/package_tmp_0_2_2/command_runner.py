@@ -35,12 +35,6 @@ def run_powershell(script: str, timeout: int = 120) -> str:
     if not is_windows():
         raise RuntimeError("Este comando precisa ser executado em Windows.")
 
-    wrapped_script = (
-        "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); "
-        "$OutputEncoding = [System.Text.UTF8Encoding]::new(); "
-        + script
-    )
-
     completed = subprocess.run(
         [
             "powershell",
@@ -48,12 +42,10 @@ def run_powershell(script: str, timeout: int = 120) -> str:
             "-ExecutionPolicy",
             "Bypass",
             "-Command",
-            wrapped_script,
+            script,
         ],
         capture_output=True,
         text=True,
-        encoding="utf-8",
-        errors="replace",
         timeout=timeout,
     )
 
@@ -1109,44 +1101,6 @@ def cancel_power_action(payload: dict[str, Any] | None = None) -> CommandResult:
 
 
 
-
-PROTECTED_PROCESS_NAMES = {
-    "system",
-    "registry",
-    "smss.exe",
-    "csrss.exe",
-    "wininit.exe",
-    "winlogon.exe",
-    "services.exe",
-    "lsass.exe",
-    "svchost.exe",
-    "fontdrvhost.exe",
-    "dwm.exe",
-    "memory compression",
-    "memcompression",
-}
-
-PROTECTED_SERVICE_NAMES = {
-    "rpcss",
-    "dcomlaunch",
-    "plugplay",
-    "eventlog",
-    "samss",
-    "winmgmt",
-    "w32time",
-    "nlasvc",
-    "netprofm",
-    "dhcp",
-    "dnscache",
-    "mpssvc",
-    "windefend",
-    "securityhealthservice",
-    "schedule",
-    "lanmanworkstation",
-    "lanmanserver",
-}
-
-
 def kill_process(payload: dict[str, Any] | None = None) -> CommandResult:
     payload = payload or {}
 
@@ -1173,56 +1127,17 @@ def kill_process(payload: dict[str, Any] | None = None) -> CommandResult:
             error_code="KILL_PROCESS_TARGET_REQUIRED",
         )
 
-    target_name = process_name.lower()
-
-    if target_name in PROTECTED_PROCESS_NAMES:
-        return CommandResult(
-            success=False,
-            output={
-                "message": "Processo protegido. Encerramento bloqueado por segurança.",
-                "process_name": process_name,
-            },
-            error_code="PROTECTED_PROCESS",
-        )
-
     try:
         import psutil
 
         killed: list[dict[str, Any]] = []
 
         if pid:
-            try:
-                process = psutil.Process(int(pid))
-            except psutil.NoSuchProcess:
-                return CommandResult(
-                    success=False,
-                    output={
-                        "message": "Processo não encontrado. A lista pode estar desatualizada. Colete processos novamente.",
-                        "pid": pid,
-                        "process_name": process_name or None,
-                    },
-                    error_code="PROCESS_NOT_FOUND",
-                )
-
-            actual_name = process.name()
-            actual_name_lower = str(actual_name or "").lower()
-
-            if actual_name_lower in PROTECTED_PROCESS_NAMES:
-                return CommandResult(
-                    success=False,
-                    output={
-                        "message": "Processo protegido. Encerramento bloqueado por segurança.",
-                        "pid": process.pid,
-                        "process_name": actual_name,
-                    },
-                    error_code="PROTECTED_PROCESS",
-                )
-
+            process = psutil.Process(int(pid))
             killed.append({
                 "pid": process.pid,
-                "name": actual_name,
+                "name": process.name(),
             })
-
             process.terminate()
 
             try:
@@ -1233,21 +1148,12 @@ def kill_process(payload: dict[str, Any] | None = None) -> CommandResult:
         else:
             for process in psutil.process_iter(["pid", "name"]):
                 try:
-                    current_name = str(process.info.get("name") or "")
-                    current_name_lower = current_name.lower()
-
-                    if current_name_lower != target_name:
-                        continue
-
-                    if current_name_lower in PROTECTED_PROCESS_NAMES:
-                        continue
-
-                    killed.append({
-                        "pid": process.pid,
-                        "name": current_name,
-                    })
-
-                    process.terminate()
+                    if str(process.info.get("name") or "").lower() == process_name.lower():
+                        killed.append({
+                            "pid": process.pid,
+                            "name": process.info.get("name"),
+                        })
+                        process.terminate()
                 except Exception:
                     continue
 
@@ -1302,17 +1208,6 @@ def _run_service_action(
                 "message": "Informe service_name.",
             },
             error_code="SERVICE_NAME_REQUIRED",
-        )
-
-    if action in {"stop", "restart"} and service_name.lower() in PROTECTED_SERVICE_NAMES:
-        return CommandResult(
-            success=False,
-            output={
-                "message": "Serviço protegido. Ação bloqueada por segurança.",
-                "service_name": service_name,
-                "action": action,
-            },
-            error_code="PROTECTED_SERVICE",
         )
 
     service_name_ps = service_name.replace("'", "''")

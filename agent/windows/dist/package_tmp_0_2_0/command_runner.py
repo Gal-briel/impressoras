@@ -35,12 +35,6 @@ def run_powershell(script: str, timeout: int = 120) -> str:
     if not is_windows():
         raise RuntimeError("Este comando precisa ser executado em Windows.")
 
-    wrapped_script = (
-        "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); "
-        "$OutputEncoding = [System.Text.UTF8Encoding]::new(); "
-        + script
-    )
-
     completed = subprocess.run(
         [
             "powershell",
@@ -48,12 +42,10 @@ def run_powershell(script: str, timeout: int = 120) -> str:
             "-ExecutionPolicy",
             "Bypass",
             "-Command",
-            wrapped_script,
+            script,
         ],
         capture_output=True,
         text=True,
-        encoding="utf-8",
-        errors="replace",
         timeout=timeout,
     )
 
@@ -924,65 +916,57 @@ def collect_processes(payload: dict[str, Any] | None = None) -> CommandResult:
     )
 
 
-
-
 def collect_services(payload: dict[str, Any] | None = None) -> CommandResult:
     payload = payload or {}
 
-    status_filter = str(payload.get("status") or "").strip().lower()
+    status_filter = str(payload.get("status") or "").strip()
     limit = _safe_int(payload.get("limit"), default=300, minimum=1, maximum=1000)
 
+    safe_status = status_filter.replace("'", "''")
+
+    script = f"""
+$ErrorActionPreference = "SilentlyContinue"
+
+$StatusFilter = '{safe_status}'
+$Limit = {limit}
+
+$services = Get-CimInstance Win32_Service
+
+if ($StatusFilter) {{
+    $services = $services | Where-Object {{ $_.State -eq $StatusFilter }}
+}}
+
+$items = $services |
+    Sort-Object DisplayName |
+    Select-Object -First $Limit |
+    ForEach-Object {{
+        [ordered]@{{
+            name = $_.Name
+            display_name = $_.DisplayName
+            status = $_.State
+            startup_type = $_.StartMode
+            start_name = $_.StartName
+            process_id = $_.ProcessId
+            path_name = $_.PathName
+            description = $_.Description
+        }}
+    }}
+
+[ordered]@{{
+    count = @($items).Count
+    limit = $Limit
+    status_filter = $StatusFilter
+    items = @($items)
+}} | ConvertTo-Json -Depth 6
+"""
+
     try:
-        import psutil
-    except Exception as exc:
-        return CommandResult(
-            success=False,
-            output={
-                "message": "psutil não disponível para coletar serviços.",
-                "error": str(exc),
-            },
-            error_code="PSUTIL_NOT_AVAILABLE",
-        )
-
-    items: list[dict[str, Any]] = []
-
-    try:
-        for service in psutil.win_service_iter():
-            try:
-                service_info = service.as_dict()
-
-                status = str(service_info.get("status") or "")
-                display_name = service_info.get("display_name") or service_info.get("name") or ""
-                name = service_info.get("name") or ""
-
-                if status_filter and status.lower() != status_filter:
-                    continue
-
-                items.append({
-                    "name": name,
-                    "display_name": display_name,
-                    "status": status,
-                    "startup_type": service_info.get("start_type"),
-                    "start_name": service_info.get("username"),
-                    "process_id": service_info.get("pid"),
-                    "path_name": service_info.get("binpath"),
-                    "description": service_info.get("description"),
-                })
-
-            except Exception:
-                continue
-
-        items.sort(key=lambda item: str(item.get("display_name") or item.get("name") or "").lower())
-        items = items[:limit]
+        output = run_powershell(script, timeout=120)
+        data = json.loads(output) if output else {"items": []}
 
         return CommandResult(
             success=True,
-            output=_clean_json_value({
-                "count": len(items),
-                "limit": limit,
-                "status_filter": status_filter or None,
-                "items": items,
-            }),
+            output=_clean_json_value(data),
         )
 
     except Exception as exc:
@@ -1107,313 +1091,7 @@ def cancel_power_action(payload: dict[str, Any] | None = None) -> CommandResult:
         )
 
 
-
-
-
-PROTECTED_PROCESS_NAMES = {
-    "system",
-    "registry",
-    "smss.exe",
-    "csrss.exe",
-    "wininit.exe",
-    "winlogon.exe",
-    "services.exe",
-    "lsass.exe",
-    "svchost.exe",
-    "fontdrvhost.exe",
-    "dwm.exe",
-    "memory compression",
-    "memcompression",
-}
-
-PROTECTED_SERVICE_NAMES = {
-    "rpcss",
-    "dcomlaunch",
-    "plugplay",
-    "eventlog",
-    "samss",
-    "winmgmt",
-    "w32time",
-    "nlasvc",
-    "netprofm",
-    "dhcp",
-    "dnscache",
-    "mpssvc",
-    "windefend",
-    "securityhealthservice",
-    "schedule",
-    "lanmanworkstation",
-    "lanmanserver",
-}
-
-
-def kill_process(payload: dict[str, Any] | None = None) -> CommandResult:
-    payload = payload or {}
-
-    confirm = str(payload.get("confirm") or "").strip().upper()
-
-    if confirm != "KILL":
-        return CommandResult(
-            success=False,
-            output={
-                "message": "Comando recusado. Envie payload.confirm = KILL para confirmar encerramento do processo.",
-            },
-            error_code="KILL_PROCESS_CONFIRMATION_REQUIRED",
-        )
-
-    pid = payload.get("pid")
-    process_name = str(payload.get("process_name") or "").strip()
-
-    if not pid and not process_name:
-        return CommandResult(
-            success=False,
-            output={
-                "message": "Informe pid ou process_name.",
-            },
-            error_code="KILL_PROCESS_TARGET_REQUIRED",
-        )
-
-    target_name = process_name.lower()
-
-    if target_name in PROTECTED_PROCESS_NAMES:
-        return CommandResult(
-            success=False,
-            output={
-                "message": "Processo protegido. Encerramento bloqueado por segurança.",
-                "process_name": process_name,
-            },
-            error_code="PROTECTED_PROCESS",
-        )
-
-    try:
-        import psutil
-
-        killed: list[dict[str, Any]] = []
-
-        if pid:
-            try:
-                process = psutil.Process(int(pid))
-            except psutil.NoSuchProcess:
-                return CommandResult(
-                    success=False,
-                    output={
-                        "message": "Processo não encontrado. A lista pode estar desatualizada. Colete processos novamente.",
-                        "pid": pid,
-                        "process_name": process_name or None,
-                    },
-                    error_code="PROCESS_NOT_FOUND",
-                )
-
-            actual_name = process.name()
-            actual_name_lower = str(actual_name or "").lower()
-
-            if actual_name_lower in PROTECTED_PROCESS_NAMES:
-                return CommandResult(
-                    success=False,
-                    output={
-                        "message": "Processo protegido. Encerramento bloqueado por segurança.",
-                        "pid": process.pid,
-                        "process_name": actual_name,
-                    },
-                    error_code="PROTECTED_PROCESS",
-                )
-
-            killed.append({
-                "pid": process.pid,
-                "name": actual_name,
-            })
-
-            process.terminate()
-
-            try:
-                process.wait(timeout=10)
-            except psutil.TimeoutExpired:
-                process.kill()
-
-        else:
-            for process in psutil.process_iter(["pid", "name"]):
-                try:
-                    current_name = str(process.info.get("name") or "")
-                    current_name_lower = current_name.lower()
-
-                    if current_name_lower != target_name:
-                        continue
-
-                    if current_name_lower in PROTECTED_PROCESS_NAMES:
-                        continue
-
-                    killed.append({
-                        "pid": process.pid,
-                        "name": current_name,
-                    })
-
-                    process.terminate()
-                except Exception:
-                    continue
-
-        return CommandResult(
-            success=True,
-            output=_clean_json_value({
-                "message": "Solicitação de encerramento de processo executada.",
-                "target": {
-                    "pid": pid,
-                    "process_name": process_name or None,
-                },
-                "killed": killed,
-                "count": len(killed),
-            }),
-        )
-
-    except Exception as exc:
-        return CommandResult(
-            success=False,
-            output={
-                "message": "Falha ao encerrar processo.",
-                "error": str(exc),
-            },
-            error_code="KILL_PROCESS_FAILED",
-        )
-
-
-def _run_service_action(
-    payload: dict[str, Any] | None,
-    action: str,
-    confirmation_word: str,
-) -> CommandResult:
-    payload = payload or {}
-
-    confirm = str(payload.get("confirm") or "").strip().upper()
-
-    if confirm != confirmation_word:
-        return CommandResult(
-            success=False,
-            output={
-                "message": f"Comando recusado. Envie payload.confirm = {confirmation_word} para confirmar.",
-            },
-            error_code=f"SERVICE_{confirmation_word}_CONFIRMATION_REQUIRED",
-        )
-
-    service_name = str(payload.get("service_name") or payload.get("name") or "").strip()
-
-    if not service_name:
-        return CommandResult(
-            success=False,
-            output={
-                "message": "Informe service_name.",
-            },
-            error_code="SERVICE_NAME_REQUIRED",
-        )
-
-    if action in {"stop", "restart"} and service_name.lower() in PROTECTED_SERVICE_NAMES:
-        return CommandResult(
-            success=False,
-            output={
-                "message": "Serviço protegido. Ação bloqueada por segurança.",
-                "service_name": service_name,
-                "action": action,
-            },
-            error_code="PROTECTED_SERVICE",
-        )
-
-    service_name_ps = service_name.replace("'", "''")
-
-    if action == "start":
-        command = f"""
-$ErrorActionPreference = "Stop"
-$svc = Get-Service -Name '{service_name_ps}'
-Start-Service -Name $svc.Name
-Start-Sleep -Seconds 2
-$svc = Get-Service -Name '{service_name_ps}'
-[ordered]@{{
-    name = $svc.Name
-    display_name = $svc.DisplayName
-    status = [string]$svc.Status
-}} | ConvertTo-Json -Depth 4
-"""
-    elif action == "stop":
-        command = f"""
-$ErrorActionPreference = "Stop"
-$svc = Get-Service -Name '{service_name_ps}'
-Stop-Service -Name $svc.Name -Force
-Start-Sleep -Seconds 2
-$svc = Get-Service -Name '{service_name_ps}'
-[ordered]@{{
-    name = $svc.Name
-    display_name = $svc.DisplayName
-    status = [string]$svc.Status
-}} | ConvertTo-Json -Depth 4
-"""
-    elif action == "restart":
-        command = f"""
-$ErrorActionPreference = "Stop"
-$svc = Get-Service -Name '{service_name_ps}'
-Restart-Service -Name $svc.Name -Force
-Start-Sleep -Seconds 2
-$svc = Get-Service -Name '{service_name_ps}'
-[ordered]@{{
-    name = $svc.Name
-    display_name = $svc.DisplayName
-    status = [string]$svc.Status
-}} | ConvertTo-Json -Depth 4
-"""
-    else:
-        return CommandResult(
-            success=False,
-            output={"message": "Ação de serviço inválida."},
-            error_code="INVALID_SERVICE_ACTION",
-        )
-
-    try:
-        output = run_powershell(command, timeout=90)
-        data = json.loads(output) if output else {}
-
-        return CommandResult(
-            success=True,
-            output=_clean_json_value({
-                "message": f"Ação '{action}' executada no serviço.",
-                "service_name": service_name,
-                "action": action,
-                "service": data,
-            }),
-        )
-
-    except Exception as exc:
-        return CommandResult(
-            success=False,
-            output={
-                "message": f"Falha ao executar ação '{action}' no serviço.",
-                "service_name": service_name,
-                "error": str(exc),
-            },
-            error_code=f"SERVICE_{confirmation_word}_FAILED",
-        )
-
-
-def start_service(payload: dict[str, Any] | None = None) -> CommandResult:
-    return _run_service_action(payload, "start", "START")
-
-
-def stop_service(payload: dict[str, Any] | None = None) -> CommandResult:
-    return _run_service_action(payload, "stop", "STOP")
-
-
-def restart_service(payload: dict[str, Any] | None = None) -> CommandResult:
-    return _run_service_action(payload, "restart", "RESTART")
-
-
 def execute_command(command_type: str, payload: dict[str, Any]) -> CommandResult:
-    if command_type == "kill_process":
-        return kill_process(payload)
-
-    if command_type == "start_service":
-        return start_service(payload)
-
-    if command_type == "stop_service":
-        return stop_service(payload)
-
-    if command_type == "restart_service":
-        return restart_service(payload)
-
     if command_type == "collect_processes":
         return collect_processes(payload)
 

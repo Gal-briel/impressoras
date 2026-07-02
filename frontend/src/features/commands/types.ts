@@ -20,12 +20,19 @@ export type CommandType =
   | 'restart_spooler'
   | 'clear_print_queue'
   | 'collect_inventory'
-  | 'collect_diagnostics' | 'update_agent'
+  | 'collect_diagnostics'
+  | 'update_agent'
   | 'install_printer'
   | 'restart_service'
   | 'set_default_printer'
   | 'remove_printer'
-  | 'print_test_page';
+  | 'print_test_page'
+  | 'collect_processes'
+  | 'collect_services'
+  | 'reboot_machine'
+  | 'shutdown_machine'
+  | 'cancel_power_action'
+  | 'kill_process';
 
 export type Command = {
   id: string;
@@ -59,6 +66,8 @@ export type CommandStatusFilter =
 
 export type CreateCommandPayload = {
   agent_id: string;
-  command_type: CommandType;
+  command_type: CommandType | string;
   payload?: Record<string, unknown>;
+  idempotency_key?: string;
+  timeout_seconds?: number;
 };
