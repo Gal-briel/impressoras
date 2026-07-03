@@ -12,6 +12,8 @@ import { PlaceholderPage } from '../pages/PlaceholderPage';
 import { InventoryDevicesPage } from '../features/inventory/pages/InventoryDevicesPage';
 import { BulkCommandsPage } from '../features/bulk-commands/pages/BulkCommandsPage';
 import { CommandHistoryPage } from '../features/command-history/pages/CommandHistoryPage';
+import { SecurityAlertsPage } from '../features/securityAlerts/pages/SecurityAlertsPage';
+import { SoftwareInventoryChangesPage } from '../features/softwareInventoryChanges/pages/SoftwareInventoryChangesPage';
 
 export function AppRouter() {
   return (
@@ -20,6 +22,8 @@ export function AppRouter() {
 
       <Route element={<MainLayout />}>
         <Route path="/dashboard" element={<DashboardPage />} />
+        <Route path="/security-alerts" element={<SecurityAlertsPage />} />
+        <Route path="/software-changes" element={<SoftwareInventoryChangesPage />} />
         <Route path="/agents" element={<AgentsPage />} />
         <Route path="/inventory" element={<InventoryDevicesPage />} />
         <Route path="/bulk-commands" element={<BulkCommandsPage />} />

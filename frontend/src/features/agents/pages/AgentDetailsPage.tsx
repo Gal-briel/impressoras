@@ -1,3 +1,4 @@
+import { AgentSecurityHistorySection } from '../components/AgentSecurityHistorySection';
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
@@ -17,6 +18,9 @@ import { AgentInventorySection } from '../components/AgentInventorySection';
 import { AgentUpdateSection } from '../components/AgentUpdateSection';
 import { AgentAdminActionsSection } from '../components/AgentAdminActionsSection';
 import { AgentSecurityInventorySection } from '../components/AgentSecurityInventorySection';
+import { AgentSoftwareInventoryHistorySection } from '../components/AgentSoftwareInventoryHistorySection';
+import { AgentSoftwareChangesSection } from '../components/AgentSoftwareChangesSection';
+import { AgentPersistedSecurityAlertsSection } from '../components/AgentPersistedSecurityAlertsSection';
 
 function PlaceholderTabContent({
   title,
@@ -116,7 +120,15 @@ export function AgentDetailsPage() {
 
         <AgentAdminActionsSection agentId={agent.id} />
 
+        <AgentPersistedSecurityAlertsSection agentId={id} />
+
         <AgentSecurityInventorySection agentId={agent.id} />
+
+        <AgentSoftwareInventoryHistorySection agentId={id} />
+
+        <AgentSoftwareChangesSection agentId={id} />
+
+        <AgentSecurityHistorySection agentId={id} />
 
         <AgentInventorySection />
 

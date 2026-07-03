@@ -5,6 +5,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from app.api.routes import persisted_inventory
+from app.api.routes import security_alerts
+from app.api.routes import software_inventory_changes
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import (
@@ -98,6 +100,8 @@ app.include_router(agent_runtime.router, prefix=settings.API_V1_STR)
 app.include_router(agent_events.router, prefix=settings.API_V1_STR)
 
 app.include_router(persisted_inventory.router, prefix="/api/v1")
+app.include_router(security_alerts.router, prefix="/api/v1")
+app.include_router(software_inventory_changes.router, prefix="/api/v1")
 
 configure_openapi(app)
 

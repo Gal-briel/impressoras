@@ -514,6 +514,14 @@ export function AgentSecurityInventorySection({ agentId }: AgentSecurityInventor
     queryClient.invalidateQueries({
       queryKey: ['agents', agentId, 'persisted-security-snapshots'],
     });
+
+    queryClient.invalidateQueries({
+      queryKey: ['agents', agentId, 'latest-security-alerts'],
+    });
+
+    queryClient.invalidateQueries({
+      queryKey: ['agents', agentId, 'latest-security-snapshot-comparison'],
+    });
   };
 
   const commands = commandsData?.items || [];
@@ -810,7 +818,7 @@ export function AgentSecurityInventorySection({ agentId }: AgentSecurityInventor
       </div>
 
       <div className="mb-5 rounded-xl border border-slate-200 p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="hidden flex flex-wrap items-start justify-between gap-3">
           <div>
             <h3 className="font-semibold text-slate-900">Alertas automáticos de segurança</h3>
             <p className="mt-1 text-xs text-slate-500">

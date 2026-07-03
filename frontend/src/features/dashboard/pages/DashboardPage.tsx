@@ -3,6 +3,8 @@ import { Card } from '../../../components/ui/Card';
 import { PageHeader } from '../../../components/ui/PageHeader';
 import { StatCard } from '../../../components/ui/StatCard';
 import { useDashboardSummary } from '../hooks/useDashboardSummary';
+import { SecurityAlertsDashboardCard } from '../components/SecurityAlertsDashboardCard';
+import { SoftwareChangesDashboardCard } from '../components/SoftwareChangesDashboardCard';
 
 export function DashboardPage() {
   const { data, isLoading, isError, error, refetch, isFetching } = useDashboardSummary();
@@ -84,6 +86,14 @@ export function DashboardPage() {
           />
         </div>
       )}
+
+      <div className="mt-8">
+        <SecurityAlertsDashboardCard />
+      </div>
+
+      <div className="mt-8">
+        <SoftwareChangesDashboardCard />
+      </div>
 
       <div className="mt-8 grid gap-4 lg:grid-cols-2">
         <Card className="p-6">
