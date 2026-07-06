@@ -1,5 +1,5 @@
 import { FormEvent, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 
 import { Card } from '../../../components/ui/Card';
 import { PageHeader } from '../../../components/ui/PageHeader';
@@ -8,113 +8,25 @@ import {
   useOperationalAlerts,
   useOperationalAlertsSummary,
   useResolveOperationalAlert,
+  useSyncAllOperationalAlerts,
   useSyncOfflineAgentAlerts,
   useSyncSoftwareChangeAlerts,
 } from '../hooks/useOperationalAlerts';
-
-function formatDate(value?: string | null) {
-  if (!value) {
-    return '—';
-  }
-
-  try {
-    return new Intl.DateTimeFormat('pt-BR', {
-      dateStyle: 'short',
-      timeStyle: 'short',
-    }).format(new Date(value));
-  } catch {
-    return value;
-  }
-}
-
-function severityLabel(severity: string) {
-  if (severity === 'critical') {
-    return 'Crítico';
-  }
-
-  if (severity === 'warning') {
-    return 'Atenção';
-  }
-
-  return 'Info';
-}
-
-function severityBadgeClass(severity: string) {
-  if (severity === 'critical') {
-    return 'border-red-200 bg-red-50 text-red-700';
-  }
-
-  if (severity === 'warning') {
-    return 'border-amber-200 bg-amber-50 text-amber-700';
-  }
-
-  return 'border-blue-200 bg-blue-50 text-blue-700';
-}
-
-function statusLabel(status: string) {
-  if (status === 'active') {
-    return 'Ativo';
-  }
-
-  if (status === 'resolved') {
-    return 'Resolvido';
-  }
-
-  if (status === 'ignored') {
-    return 'Ignorado';
-  }
-
-  return status;
-}
-
-function statusBadgeClass(status: string) {
-  if (status === 'active') {
-    return 'border-red-200 bg-red-50 text-red-700';
-  }
-
-  if (status === 'resolved') {
-    return 'border-emerald-200 bg-emerald-50 text-emerald-700';
-  }
-
-  return 'border-slate-200 bg-slate-50 text-slate-700';
-}
-
-function alertTypeLabel(alertType: string) {
-  const labels: Record<string, string> = {
-    command_failed: 'Falha em comando',
-    manual_test: 'Teste manual',
-    agent_offline: 'Agente offline',
-    security_alert: 'Segurança',
-    software_change: 'Mudança de software',
-  };
-
-  return labels[alertType] || alertType;
-}
-
-const statusOptions = [
-  { value: 'active', label: 'Ativos' },
-  { value: 'resolved', label: 'Resolvidos' },
-  { value: 'ignored', label: 'Ignorados' },
-  { value: 'all', label: 'Todos' },
-];
-
-const severityOptions = [
-  { value: 'all', label: 'Todas' },
-  { value: 'critical', label: 'Crítico' },
-  { value: 'warning', label: 'Atenção' },
-  { value: 'info', label: 'Info' },
-];
-
-const alertTypeOptions = [
-  { value: 'all', label: 'Todos' },
-  { value: 'command_failed', label: 'Falha em comando' },
-  { value: 'agent_offline', label: 'Agente offline' },
-  { value: 'security_alert', label: 'Segurança' },
-  { value: 'software_change', label: 'Mudança de software' },
-  { value: 'manual_test', label: 'Teste manual' },
-];
+import {
+  alertTypeLabel,
+  alertTypeOptions,
+  formatDate,
+  severityBadgeClass,
+  severityLabel,
+  severityOptions,
+  statusBadgeClass,
+  statusLabel,
+  statusOptions,
+} from '../utils/operationalAlertTaxonomy';
 
 export function OperationalAlertsPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const agentIdFilter = searchParams.get('agent_id') || undefined;
   const [statusFilter, setStatusFilter] = useState('active');
   const [severity, setSeverity] = useState('all');
   const [alertType, setAlertType] = useState('all');
@@ -136,6 +48,7 @@ export function OperationalAlertsPage() {
 
   const resolveMutation = useResolveOperationalAlert();
   const ignoreMutation = useIgnoreOperationalAlert();
+  const syncAllMutation = useSyncAllOperationalAlerts();
   const syncOfflineMutation = useSyncOfflineAgentAlerts();
   const syncSoftwareMutation = useSyncSoftwareChangeAlerts();
 
@@ -148,6 +61,7 @@ export function OperationalAlertsPage() {
   const isMutating =
     resolveMutation.isPending ||
     ignoreMutation.isPending ||
+    syncAllMutation.isPending ||
     syncOfflineMutation.isPending ||
     syncSoftwareMutation.isPending;
 
@@ -172,6 +86,12 @@ export function OperationalAlertsPage() {
     setOffset(0);
   }
 
+  function clearAgentFilter() {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('agent_id');
+    setSearchParams(nextParams);
+  }
+
   function refresh() {
     summaryQuery.refetch();
     alertsQuery.refetch();
@@ -190,6 +110,16 @@ export function OperationalAlertsPage() {
         },
       },
     );
+  }
+
+  function syncAllAlerts() {
+    syncAllMutation.mutate(15, {
+      onSuccess: (result) => {
+        window.alert(
+          `Sincronização geral concluída. Abertos/atualizados: ${result.totals.opened_or_refreshed}. Resolvidos: ${result.totals.resolved}.`,
+        );
+      },
+    });
   }
 
   function syncSoftwareChanges() {
@@ -242,6 +172,15 @@ export function OperationalAlertsPage() {
               className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 shadow-sm hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {syncOfflineMutation.isPending ? 'Sincronizando...' : 'Sincronizar offline'}
+            </button>
+
+            <button
+              type="button"
+              onClick={syncAllAlerts}
+              disabled={syncAllMutation.isPending}
+              className="rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800 shadow-sm hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {syncAllMutation.isPending ? 'Sincronizando...' : 'Sincronizar tudo'}
             </button>
 
             <button

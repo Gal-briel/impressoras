@@ -151,6 +151,14 @@ export type OfflineAgentsSyncResponse = {
   resolved: number;
 };
 
+
+export interface SyncAllOperationalAlertsResponse {
+  offline_agents: OfflineAgentsSyncResponse;
+  security_alerts: OfflineAgentsSyncResponse;
+  software_changes: OfflineAgentsSyncResponse;
+  totals: OfflineAgentsSyncResponse;
+}
+
 export async function syncOfflineAgentAlerts(offlineAfterMinutes = 15) {
   const { data } = await api.post<OfflineAgentsSyncResponse>(
     '/operational-alerts/sync/offline-agents',
@@ -168,6 +176,20 @@ export async function syncOfflineAgentAlerts(offlineAfterMinutes = 15) {
 export async function syncSoftwareChangeAlerts() {
   const { data } = await api.post<OfflineAgentsSyncResponse>(
     '/operational-alerts/sync/software-changes',
+  );
+
+  return data;
+}
+
+export async function syncAllOperationalAlerts(offlineAfterMinutes = 15) {
+  const { data } = await api.post<SyncAllOperationalAlertsResponse>(
+    '/operational-alerts/sync/all',
+    undefined,
+    {
+      params: {
+        offline_after_minutes: offlineAfterMinutes,
+      },
+    },
   );
 
   return data;

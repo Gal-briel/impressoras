@@ -8,6 +8,7 @@ import { Card } from '../../../components/ui/Card';
 import { PageHeader } from '../../../components/ui/PageHeader';
 import { AgentCommandsPanel } from '../components/AgentCommandsPanel';
 import { AgentDetailsTabs, type TabKey } from '../components/AgentDetailsTabs';
+import { AgentOperationalAlertsSection } from '../components/AgentOperationalAlertsSection';
 import { AgentEventsPanel } from '../components/AgentEventsPanel';
 import { AgentInfoCard } from '../components/AgentInfoCard';
 import { AgentPrintersPanel } from '../components/AgentPrintersPanel';
@@ -119,6 +120,8 @@ export function AgentDetailsPage() {
         <AgentUpdateSection />
 
         <AgentAdminActionsSection agentId={agent.id} />
+
+        <AgentOperationalAlertsSection agentId={agent.id} />
 
         <AgentPersistedSecurityAlertsSection agentId={id} />
 

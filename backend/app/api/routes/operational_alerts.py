@@ -511,3 +511,64 @@ def sync_software_change_operational_alerts(
             conn.commit()
 
     return serialize_row(dict(row))
+
+
+@router.post("/sync/all")
+def sync_all_operational_alerts(
+    offline_after_minutes: int = 15,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    tenant_id = get_current_tenant_id(current_user)
+
+    with get_connection() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT *
+                FROM sync_operational_alerts_for_offline_agents(%s, %s);
+                """,
+                (tenant_id, offline_after_minutes),
+            )
+            offline_result = dict(cur.fetchone())
+
+            cur.execute(
+                """
+                SELECT *
+                FROM sync_operational_alerts_from_active_security_alerts(%s);
+                """,
+                (tenant_id,),
+            )
+            security_result = dict(cur.fetchone())
+
+            cur.execute(
+                """
+                SELECT *
+                FROM sync_operational_alerts_from_active_software_changes(%s);
+                """,
+                (tenant_id,),
+            )
+            software_result = dict(cur.fetchone())
+
+            conn.commit()
+
+    total_opened_or_refreshed = (
+        int(offline_result.get("opened_or_refreshed") or 0)
+        + int(security_result.get("opened_or_refreshed") or 0)
+        + int(software_result.get("opened_or_refreshed") or 0)
+    )
+
+    total_resolved = (
+        int(offline_result.get("resolved") or 0)
+        + int(security_result.get("resolved") or 0)
+        + int(software_result.get("resolved") or 0)
+    )
+
+    return {
+        "offline_agents": serialize_row(offline_result),
+        "security_alerts": serialize_row(security_result),
+        "software_changes": serialize_row(software_result),
+        "totals": {
+            "opened_or_refreshed": total_opened_or_refreshed,
+            "resolved": total_resolved,
+        },
+    }
