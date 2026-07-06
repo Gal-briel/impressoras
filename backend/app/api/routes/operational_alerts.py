@@ -489,3 +489,25 @@ def sync_security_operational_alerts(
             conn.commit()
 
     return serialize_row(dict(row))
+
+
+@router.post("/sync/software-changes")
+def sync_software_change_operational_alerts(
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    tenant_id = get_current_tenant_id(current_user)
+
+    with get_connection() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT *
+                FROM sync_operational_alerts_from_active_software_changes(%s);
+                """,
+                (tenant_id,),
+            )
+
+            row = cur.fetchone()
+            conn.commit()
+
+    return serialize_row(dict(row))

@@ -9,6 +9,7 @@ import {
   useOperationalAlertsSummary,
   useResolveOperationalAlert,
   useSyncOfflineAgentAlerts,
+  useSyncSoftwareChangeAlerts,
 } from '../hooks/useOperationalAlerts';
 
 function formatDate(value?: string | null) {
@@ -136,6 +137,7 @@ export function OperationalAlertsPage() {
   const resolveMutation = useResolveOperationalAlert();
   const ignoreMutation = useIgnoreOperationalAlert();
   const syncOfflineMutation = useSyncOfflineAgentAlerts();
+  const syncSoftwareMutation = useSyncSoftwareChangeAlerts();
 
   const summary = summaryQuery.data?.summary;
   const alerts = alertsQuery.data?.items || [];
@@ -143,7 +145,11 @@ export function OperationalAlertsPage() {
 
   const isLoading = summaryQuery.isLoading || alertsQuery.isLoading;
   const hasError = summaryQuery.isError || alertsQuery.isError;
-  const isMutating = resolveMutation.isPending || ignoreMutation.isPending || syncOfflineMutation.isPending;
+  const isMutating =
+    resolveMutation.isPending ||
+    ignoreMutation.isPending ||
+    syncOfflineMutation.isPending ||
+    syncSoftwareMutation.isPending;
 
   function handleSearch(event: FormEvent) {
     event.preventDefault();
@@ -186,6 +192,16 @@ export function OperationalAlertsPage() {
     );
   }
 
+  function syncSoftwareChanges() {
+    syncSoftwareMutation.mutate(undefined, {
+      onSuccess: (result) => {
+        window.alert(
+          `Sincronização de software concluída. Abertos/atualizados: ${result.opened_or_refreshed}. Resolvidos: ${result.resolved}.`,
+        );
+      },
+    });
+  }
+
   function resolveAlert(alertId: string) {
     const note = window.prompt('Observação da resolução:', 'Resolvido manualmente pela central de alertas.');
 
@@ -226,6 +242,15 @@ export function OperationalAlertsPage() {
               className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 shadow-sm hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {syncOfflineMutation.isPending ? 'Sincronizando...' : 'Sincronizar offline'}
+            </button>
+
+            <button
+              type="button"
+              onClick={syncSoftwareChanges}
+              disabled={syncSoftwareMutation.isPending}
+              className="rounded-lg border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-800 shadow-sm hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {syncSoftwareMutation.isPending ? 'Sincronizando...' : 'Sincronizar software'}
             </button>
 
             <button

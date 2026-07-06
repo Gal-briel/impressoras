@@ -6,6 +6,7 @@ import {
   ignoreOperationalAlert,
   resolveOperationalAlert,
   syncOfflineAgentAlerts,
+  syncSoftwareChangeAlerts,
 } from '../api/operationalAlertsApi';
 
 export function useOperationalAlertsSummary() {
@@ -97,3 +98,15 @@ export function useSyncOfflineAgentAlerts() {
     },
   });
 }
+
+export function useSyncSoftwareChangeAlerts() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: syncSoftwareChangeAlerts,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['operational-alerts'] });
+    },
+  });
+}
+

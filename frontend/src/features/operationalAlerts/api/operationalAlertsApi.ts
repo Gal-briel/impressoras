@@ -164,3 +164,12 @@ export async function syncOfflineAgentAlerts(offlineAfterMinutes = 15) {
 
   return data;
 }
+
+export async function syncSoftwareChangeAlerts() {
+  const { data } = await api.post<OfflineAgentsSyncResponse>(
+    '/operational-alerts/sync/software-changes',
+  );
+
+  return data;
+}
+
