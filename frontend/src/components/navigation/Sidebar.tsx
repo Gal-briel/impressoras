@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom';
 const items = [
   { label: 'Dashboard', path: '/dashboard' },
   { label: 'Alertas', path: '/security-alerts' },
+  { label: 'Alertas Op.', path: '/operational-alerts' },
   { label: 'Mudanças SW', path: '/software-changes' },
   { label: 'Agentes', path: '/agents' },
   { label: 'Inventário', path: '/inventory' },

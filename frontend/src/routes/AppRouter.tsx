@@ -14,6 +14,7 @@ import { BulkCommandsPage } from '../features/bulk-commands/pages/BulkCommandsPa
 import { CommandHistoryPage } from '../features/command-history/pages/CommandHistoryPage';
 import { SecurityAlertsPage } from '../features/securityAlerts/pages/SecurityAlertsPage';
 import { SoftwareInventoryChangesPage } from '../features/softwareInventoryChanges/pages/SoftwareInventoryChangesPage';
+import { OperationalAlertsPage } from '../features/operationalAlerts/pages/OperationalAlertsPage';
 
 export function AppRouter() {
   return (
@@ -23,6 +24,7 @@ export function AppRouter() {
       <Route element={<MainLayout />}>
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/security-alerts" element={<SecurityAlertsPage />} />
+        <Route path="/operational-alerts" element={<OperationalAlertsPage />} />
         <Route path="/software-changes" element={<SoftwareInventoryChangesPage />} />
         <Route path="/agents" element={<AgentsPage />} />
         <Route path="/inventory" element={<InventoryDevicesPage />} />

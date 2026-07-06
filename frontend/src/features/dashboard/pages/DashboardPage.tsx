@@ -5,6 +5,7 @@ import { StatCard } from '../../../components/ui/StatCard';
 import { useDashboardSummary } from '../hooks/useDashboardSummary';
 import { SecurityAlertsDashboardCard } from '../components/SecurityAlertsDashboardCard';
 import { SoftwareChangesDashboardCard } from '../components/SoftwareChangesDashboardCard';
+import { OperationalAlertsDashboardCard } from '../components/OperationalAlertsDashboardCard';
 
 export function DashboardPage() {
   const { data, isLoading, isError, error, refetch, isFetching } = useDashboardSummary();
@@ -86,6 +87,10 @@ export function DashboardPage() {
           />
         </div>
       )}
+
+      <div className="mt-8">
+        <OperationalAlertsDashboardCard />
+      </div>
 
       <div className="mt-8">
         <SecurityAlertsDashboardCard />
