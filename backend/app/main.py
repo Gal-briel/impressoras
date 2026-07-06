@@ -31,6 +31,7 @@ from app.workers.rabbitmq import rabbitmq_client
 from app.workers.timeout_monitor import monitor_command_timeouts
 from app.api.routes import dashboard
 from app.api.routes import operational_alerts
+from app.api.routes import notifications
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +105,7 @@ app.include_router(persisted_inventory.router, prefix="/api/v1")
 app.include_router(security_alerts.router, prefix="/api/v1")
 app.include_router(software_inventory_changes.router, prefix="/api/v1")
 app.include_router(operational_alerts.router, prefix="/api/v1")
+app.include_router(notifications.router, prefix="/api/v1")
 
 configure_openapi(app)
 

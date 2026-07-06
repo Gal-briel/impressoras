@@ -41,6 +41,13 @@ def _empty_sync_result() -> dict[str, int]:
     }
 
 
+def _empty_notification_sync_result() -> dict[str, int]:
+    return {
+        "opened_or_refreshed": 0,
+        "archived": 0,
+    }
+
+
 def _normalize_sync_result(row: dict[str, Any] | None) -> dict[str, int]:
     row = row or {}
 
@@ -50,12 +57,22 @@ def _normalize_sync_result(row: dict[str, Any] | None) -> dict[str, int]:
     }
 
 
+def _normalize_notification_sync_result(row: dict[str, Any] | None) -> dict[str, int]:
+    row = row or {}
+
+    return {
+        "opened_or_refreshed": int(row.get("opened_or_refreshed") or 0),
+        "archived": int(row.get("archived") or 0),
+    }
+
+
 def sync_operational_alerts_once() -> dict[str, Any]:
     totals: dict[str, Any] = {
         "tenants": 0,
         "offline_agents": _empty_sync_result(),
         "security_alerts": _empty_sync_result(),
         "software_changes": _empty_sync_result(),
+        "notifications": _empty_notification_sync_result(),
         "totals": _empty_sync_result(),
     }
 
@@ -101,6 +118,15 @@ def sync_operational_alerts_once() -> dict[str, Any]:
                 )
                 software_result = _normalize_sync_result(cur.fetchone())
 
+                cur.execute(
+                    """
+                    SELECT *
+                    FROM sync_notifications_from_active_operational_alerts(%s);
+                    """,
+                    (tenant_id,),
+                )
+                notification_result = _normalize_notification_sync_result(cur.fetchone())
+
                 totals["tenants"] += 1
 
                 for key in ("opened_or_refreshed", "resolved"):
@@ -113,6 +139,9 @@ def sync_operational_alerts_once() -> dict[str, Any]:
                         + software_result[key]
                     )
 
+                for key in ("opened_or_refreshed", "archived"):
+                    totals["notifications"][key] += notification_result[key]
+
             conn.commit()
 
     return totals
@@ -122,7 +151,7 @@ def sync_offline_agents_once() -> dict[str, Any]:
     """Compatibilidade com o nome usado nas sprints anteriores.
 
     A partir da Sprint 22.11, esta função executa a sincronização operacional
-    completa: agente offline, alertas de segurança e mudanças de software.
+    completa. A partir da Sprint 23.6, também reconcilia notificações internas.
     """
     return sync_operational_alerts_once()
 
@@ -144,6 +173,7 @@ async def offline_agents_scheduler_loop() -> None:
                 "offline_opened_or_refreshed=%s offline_resolved=%s "
                 "security_opened_or_refreshed=%s security_resolved=%s "
                 "software_opened_or_refreshed=%s software_resolved=%s "
+                "notifications_opened_or_refreshed=%s notifications_archived=%s "
                 "total_opened_or_refreshed=%s total_resolved=%s",
                 result["tenants"],
                 result["offline_agents"]["opened_or_refreshed"],
@@ -152,6 +182,8 @@ async def offline_agents_scheduler_loop() -> None:
                 result["security_alerts"]["resolved"],
                 result["software_changes"]["opened_or_refreshed"],
                 result["software_changes"]["resolved"],
+                result["notifications"]["opened_or_refreshed"],
+                result["notifications"]["archived"],
                 result["totals"]["opened_or_refreshed"],
                 result["totals"]["resolved"],
             )

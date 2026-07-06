@@ -1,9 +1,11 @@
+import { useNotificationsSummary } from '../../features/notifications/hooks/usePersistentNotifications';
 import { NavLink } from 'react-router-dom';
 
 const items = [
   { label: 'Dashboard', path: '/dashboard' },
   { label: 'Alertas', path: '/security-alerts' },
   { label: 'Alertas Op.', path: '/operational-alerts' },
+  { label: 'Notificações', path: '/notifications' },
   { label: 'Mudanças SW', path: '/software-changes' },
   { label: 'Agentes', path: '/agents' },
   { label: 'Inventário', path: '/inventory' },
@@ -16,6 +18,8 @@ const items = [
 ];
 
 export function Sidebar() {
+  const notificationsSummaryQuery = useNotificationsSummary();
+  const unreadNotifications = notificationsSummaryQuery.data?.summary.unread_total ?? 0;
   return (
     <aside className="hidden min-h-screen w-72 border-r border-slate-800 bg-slate-950 px-4 py-5 text-white lg:block">
       <div className="mb-8 px-2">
@@ -42,7 +46,12 @@ export function Sidebar() {
               ].join(' ')
             }
           >
-            {item.label}
+            <span><span>{item.label}</span>
+              {item.path === '/notifications' && unreadNotifications > 0 ? (
+                <span className="ml-auto rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold text-white">
+                  {unreadNotifications}
+                </span>
+              ) : null}</span>
           </NavLink>
         ))}
       </nav>

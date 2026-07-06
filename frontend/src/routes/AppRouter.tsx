@@ -15,6 +15,7 @@ import { CommandHistoryPage } from '../features/command-history/pages/CommandHis
 import { SecurityAlertsPage } from '../features/securityAlerts/pages/SecurityAlertsPage';
 import { SoftwareInventoryChangesPage } from '../features/softwareInventoryChanges/pages/SoftwareInventoryChangesPage';
 import { OperationalAlertsPage } from '../features/operationalAlerts/pages/OperationalAlertsPage';
+import { NotificationsPage } from '../features/notifications/pages/NotificationsPage';
 
 export function AppRouter() {
   return (
@@ -25,6 +26,7 @@ export function AppRouter() {
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/security-alerts" element={<SecurityAlertsPage />} />
         <Route path="/operational-alerts" element={<OperationalAlertsPage />} />
+        <Route path="/notifications" element={<NotificationsPage />} />
         <Route path="/software-changes" element={<SoftwareInventoryChangesPage />} />
         <Route path="/agents" element={<AgentsPage />} />
         <Route path="/inventory" element={<InventoryDevicesPage />} />
