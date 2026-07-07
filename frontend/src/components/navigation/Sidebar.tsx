@@ -6,6 +6,7 @@ const items = [
   { label: 'Alertas', path: '/security-alerts' },
   { label: 'Alertas Op.', path: '/operational-alerts' },
   { label: 'Notificações', path: '/notifications' },
+  { label: 'Relatórios', path: '/reports' },
   { label: 'Mudanças SW', path: '/software-changes' },
   { label: 'Agentes', path: '/agents' },
   { label: 'Inventário', path: '/inventory' },

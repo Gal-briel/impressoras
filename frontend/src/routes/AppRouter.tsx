@@ -16,6 +16,8 @@ import { SecurityAlertsPage } from '../features/securityAlerts/pages/SecurityAle
 import { SoftwareInventoryChangesPage } from '../features/softwareInventoryChanges/pages/SoftwareInventoryChangesPage';
 import { OperationalAlertsPage } from '../features/operationalAlerts/pages/OperationalAlertsPage';
 import { NotificationsPage } from '../features/notifications/pages/NotificationsPage';
+import { ReportsPage } from '../features/reports/pages/ReportsPage';
+import { AuditPage } from '../pages/Audit/AuditPage';
 
 export function AppRouter() {
   return (
@@ -27,6 +29,7 @@ export function AppRouter() {
         <Route path="/security-alerts" element={<SecurityAlertsPage />} />
         <Route path="/operational-alerts" element={<OperationalAlertsPage />} />
         <Route path="/notifications" element={<NotificationsPage />} />
+        <Route path="/reports" element={<ReportsPage />} />
         <Route path="/software-changes" element={<SoftwareInventoryChangesPage />} />
         <Route path="/agents" element={<AgentsPage />} />
         <Route path="/inventory" element={<InventoryDevicesPage />} />
@@ -36,7 +39,7 @@ export function AppRouter() {
         <Route path="/printers" element={<PrintersPage />} />
         <Route path="/printers/:id" element={<PrinterDetailsPage />} />
         <Route path="/commands" element={<CommandsPage />} />
-        <Route path="/audit" element={<PlaceholderPage title="Auditoria" />} />
+        <Route path="/audit" element={<AuditPage />} />
         <Route path="/settings" element={<PlaceholderPage title="Configurações" />} />
       </Route>
 
