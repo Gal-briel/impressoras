@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 
 import { Badge } from '../../../components/ui/Badge';
 import { Card } from '../../../components/ui/Card';
@@ -7,17 +8,38 @@ import { StatCard } from '../../../components/ui/StatCard';
 import { CommandForm } from '../components/CommandForm';
 import { getCommandDisplayStatus } from '../components/CommandStatusBadge';
 import { CommandsTable } from '../components/CommandsTable';
+import { useAgentCommands } from '../hooks/useAgentCommands';
 import { useCommands, useCreateCommand } from '../hooks/useCommands';
 import type { Command, CommandStatusFilter, CreateCommandPayload } from '../types';
 
 function isPending(command: Command) {
   const status = getCommandDisplayStatus(command);
+
   return ['queued', 'pending', 'dispatched', 'acknowledged', 'executing'].includes(status);
 }
 
 function isFailed(command: Command) {
   const status = getCommandDisplayStatus(command);
+
   return ['failed', 'timed_out', 'timeout', 'expired'].includes(status);
+}
+
+function normalizeStatusFilter(value: string | null): CommandStatusFilter {
+  const allowed: CommandStatusFilter[] = [
+    'all',
+    'queued',
+    'executing',
+    'success',
+    'failed',
+    'timed_out',
+    'expired',
+  ];
+
+  if (value && allowed.includes(value as CommandStatusFilter)) {
+    return value as CommandStatusFilter;
+  }
+
+  return 'all';
 }
 
 function matchesStatus(command: Command, status: CommandStatusFilter) {
@@ -39,11 +61,31 @@ function matchesStatus(command: Command, status: CommandStatusFilter) {
 }
 
 export function CommandsPage() {
-  const [statusFilter, setStatusFilter] = useState<CommandStatusFilter>('all');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedAgentId = searchParams.get('agent_id') || '';
+  const selectedStatus = normalizeStatusFilter(searchParams.get('status'));
+
+  const [statusFilter, setStatusFilter] = useState<CommandStatusFilter>(selectedStatus);
   const [successMessage, setSuccessMessage] = useState('');
 
-  const { data, isLoading, isError, error, refetch, isFetching } = useCommands();
+  const allCommandsQuery = useCommands();
+  const agentCommandsQuery = useAgentCommands(selectedAgentId || undefined);
+  const activeCommandsQuery = selectedAgentId ? agentCommandsQuery : allCommandsQuery;
+
+  const {
+    data,
+    isLoading,
+    isError,
+    error,
+    refetch,
+    isFetching,
+  } = activeCommandsQuery;
+
   const createCommandMutation = useCreateCommand();
+
+  useEffect(() => {
+    setStatusFilter(selectedStatus);
+  }, [selectedStatus]);
 
   const commands = data?.items || [];
 
@@ -55,8 +97,29 @@ export function CommandsPage() {
     setSuccessMessage('');
 
     await createCommandMutation.mutateAsync(payload);
+    await refetch();
 
     setSuccessMessage('Comando enviado com sucesso.');
+  }
+
+  function updateStatusFilter(nextStatus: CommandStatusFilter) {
+    setStatusFilter(nextStatus);
+
+    const nextParams = new URLSearchParams(searchParams);
+
+    if (nextStatus === 'all') {
+      nextParams.delete('status');
+    } else {
+      nextParams.set('status', nextStatus);
+    }
+
+    setSearchParams(nextParams, { replace: true });
+  }
+
+  function clearAgentFilter() {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('agent_id');
+    setSearchParams(nextParams, { replace: true });
   }
 
   const totalCommands = commands.length;
@@ -79,11 +142,66 @@ export function CommandsPage() {
         }
       />
 
+      {selectedAgentId || statusFilter !== 'all' ? (
+        <Card className="mb-6 border-blue-200 bg-blue-50 p-5">
+          <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
+            <div>
+              <p className="text-sm font-bold text-blue-800">
+                Filtros ativos na Central de Comandos
+              </p>
+
+              {selectedAgentId ? (
+                <p className="mt-1 break-all text-sm text-blue-700">
+                  Agente: {selectedAgentId}
+                </p>
+              ) : null}
+
+              {statusFilter !== 'all' ? (
+                <p className="mt-1 text-sm text-blue-700">
+                  Status: {statusFilter}
+                </p>
+              ) : null}
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {selectedAgentId ? (
+                <Link
+                  to={`/agents/${selectedAgentId}`}
+                  className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 shadow-sm hover:bg-blue-50"
+                >
+                  Ver agente
+                </Link>
+              ) : null}
+
+              {selectedAgentId ? (
+                <button
+                  type="button"
+                  onClick={clearAgentFilter}
+                  className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 shadow-sm hover:bg-blue-50"
+                >
+                  Limpar agente
+                </button>
+              ) : null}
+
+              {statusFilter !== 'all' ? (
+                <button
+                  type="button"
+                  onClick={() => updateStatusFilter('all')}
+                  className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 shadow-sm hover:bg-blue-50"
+                >
+                  Limpar status
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </Card>
+      ) : null}
+
       <div className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard
           title="Total de comandos"
           value={totalCommands}
-          description="Criados no ambiente"
+          description={selectedAgentId ? 'Criados para este agente' : 'Criados no ambiente'}
           icon="⚙️"
         />
 
@@ -112,6 +230,7 @@ export function CommandsPage() {
       <div className="grid gap-6 xl:grid-cols-[420px_1fr]">
         <div className="space-y-4">
           <CommandForm
+            initialAgentId={selectedAgentId}
             onSubmit={handleCreateCommand}
             isSubmitting={createCommandMutation.isPending}
           />
@@ -152,7 +271,7 @@ export function CommandsPage() {
               </span>
               <select
                 value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value as CommandStatusFilter)}
+                onChange={(event) => updateStatusFilter(event.target.value as CommandStatusFilter)}
                 className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
               >
                 <option value="all">Todos</option>
@@ -189,7 +308,8 @@ export function CommandsPage() {
             <>
               <div className="mb-3 text-sm text-slate-500">
                 Exibindo <strong>{filteredCommands.length}</strong> de{' '}
-                <strong>{totalCommands}</strong> comandos.
+                <strong>{totalCommands}</strong> comandos
+                {selectedAgentId ? ' deste agente.' : '.'}
               </div>
 
               <CommandsTable commands={filteredCommands} />

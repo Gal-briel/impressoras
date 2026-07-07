@@ -1,4 +1,4 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 
 import { Card } from '../../../components/ui/Card';
@@ -24,23 +24,48 @@ import {
   statusOptions,
 } from '../utils/operationalAlertTaxonomy';
 
+function normalizeOptionValue(
+  value: string | null,
+  options: Array<{ value: string; label: string }>,
+  fallback: string,
+) {
+  if (value && options.some((option) => option.value === value)) {
+    return value;
+  }
+
+  return fallback;
+}
+
 export function OperationalAlertsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+
   const agentIdFilter = searchParams.get('agent_id') || undefined;
-  const [statusFilter, setStatusFilter] = useState('active');
-  const [severity, setSeverity] = useState('all');
-  const [alertType, setAlertType] = useState('all');
+  const statusUrlFilter = normalizeOptionValue(searchParams.get('status'), statusOptions, 'active');
+  const severityUrlFilter = normalizeOptionValue(searchParams.get('severity'), severityOptions, 'all');
+  const alertTypeUrlFilter = normalizeOptionValue(searchParams.get('alert_type'), alertTypeOptions, 'all');
+
+  const [statusFilter, setStatusFilter] = useState(statusUrlFilter);
+  const [severity, setSeverity] = useState(severityUrlFilter);
+  const [alertType, setAlertType] = useState(alertTypeUrlFilter);
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [offset, setOffset] = useState(0);
 
   const limit = 20;
 
+  useEffect(() => {
+    setStatusFilter(statusUrlFilter);
+    setSeverity(severityUrlFilter);
+    setAlertType(alertTypeUrlFilter);
+    setOffset(0);
+  }, [agentIdFilter, statusUrlFilter, severityUrlFilter, alertTypeUrlFilter]);
+
   const summaryQuery = useOperationalAlertsSummary();
   const alertsQuery = useOperationalAlerts({
     status: statusFilter,
     severity,
     alert_type: alertType,
+    agent_id: agentIdFilter,
     search,
     limit,
     offset,
@@ -65,6 +90,18 @@ export function OperationalAlertsPage() {
     syncOfflineMutation.isPending ||
     syncSoftwareMutation.isPending;
 
+  function updateUrlFilter(key: string, value: string, defaultValue: string) {
+    const nextParams = new URLSearchParams(searchParams);
+
+    if (value === defaultValue) {
+      nextParams.delete(key);
+    } else {
+      nextParams.set(key, value);
+    }
+
+    setSearchParams(nextParams, { replace: true });
+  }
+
   function handleSearch(event: FormEvent) {
     event.preventDefault();
     setOffset(0);
@@ -74,22 +111,33 @@ export function OperationalAlertsPage() {
   function handleStatus(value: string) {
     setStatusFilter(value);
     setOffset(0);
+    updateUrlFilter('status', value, 'active');
   }
 
   function handleSeverity(value: string) {
     setSeverity(value);
     setOffset(0);
+    updateUrlFilter('severity', value, 'all');
   }
 
   function handleAlertType(value: string) {
     setAlertType(value);
     setOffset(0);
+    updateUrlFilter('alert_type', value, 'all');
   }
 
   function clearAgentFilter() {
     const nextParams = new URLSearchParams(searchParams);
     nextParams.delete('agent_id');
-    setSearchParams(nextParams);
+    setSearchParams(nextParams, { replace: true });
+  }
+
+  function clearAllUrlFilters() {
+    setStatusFilter('active');
+    setSeverity('all');
+    setAlertType('all');
+    setOffset(0);
+    setSearchParams(new URLSearchParams(), { replace: true });
   }
 
   function refresh() {
@@ -244,6 +292,71 @@ export function OperationalAlertsPage() {
           <p className="mt-2 text-3xl font-bold text-slate-950">{summary?.agents_with_active_alerts ?? 0}</p>
         </Card>
       </div>
+
+      {agentIdFilter || statusFilter !== 'active' || severity !== 'all' || alertType !== 'all' ? (
+        <Card className="mb-6 border-blue-200 bg-blue-50 p-5">
+          <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
+            <div>
+              <p className="text-sm font-bold text-blue-800">
+                Filtros ativos na Central de Alertas
+              </p>
+
+              {agentIdFilter ? (
+                <p className="mt-1 break-all text-sm text-blue-700">
+                  Agente: {agentIdFilter}
+                </p>
+              ) : null}
+
+              {statusFilter !== 'active' ? (
+                <p className="mt-1 text-sm text-blue-700">
+                  Status: {statusLabel(statusFilter)}
+                </p>
+              ) : null}
+
+              {severity !== 'all' ? (
+                <p className="mt-1 text-sm text-blue-700">
+                  Severidade: {severityLabel(severity)}
+                </p>
+              ) : null}
+
+              {alertType !== 'all' ? (
+                <p className="mt-1 text-sm text-blue-700">
+                  Tipo: {alertTypeLabel(alertType)}
+                </p>
+              ) : null}
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {agentIdFilter ? (
+                <Link
+                  to={`/agents/${agentIdFilter}`}
+                  className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 shadow-sm hover:bg-blue-50"
+                >
+                  Ver agente
+                </Link>
+              ) : null}
+
+              {agentIdFilter ? (
+                <button
+                  type="button"
+                  onClick={clearAgentFilter}
+                  className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 shadow-sm hover:bg-blue-50"
+                >
+                  Limpar agente
+                </button>
+              ) : null}
+
+              <button
+                type="button"
+                onClick={clearAllUrlFilters}
+                className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 shadow-sm hover:bg-blue-50"
+              >
+                Limpar filtros
+              </button>
+            </div>
+          </div>
+        </Card>
+      ) : null}
 
       <Card className="mb-6 p-4">
         <form onSubmit={handleSearch} className="grid gap-3 xl:grid-cols-[160px_160px_220px_1fr_auto]">

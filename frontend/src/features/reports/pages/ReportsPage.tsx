@@ -1,4 +1,7 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+
+import { downloadCsv } from '../../../utils/csv';
 
 import {
   useAuditActivityReport,
@@ -91,38 +94,89 @@ function Card({
   title,
   value,
   description,
+  href,
 }: {
   title: string;
   value: number | string;
   description?: string;
+  href?: string;
 }) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+  const content = (
+    <>
       <p className="text-sm font-medium text-slate-500">{title}</p>
       <p className="mt-2 text-3xl font-bold text-slate-900">{value}</p>
       {description ? (
         <p className="mt-1 text-sm text-slate-500">{description}</p>
       ) : null}
+      {href ? (
+        <p className="mt-3 text-sm font-semibold text-blue-700">
+          Abrir detalhes →
+        </p>
+      ) : null}
+    </>
+  );
+
+  if (href) {
+    return (
+      <Link
+        to={href}
+        className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-blue-300 hover:shadow-md"
+      >
+        {content}
+      </Link>
+    );
+  }
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      {content}
     </div>
+  );
+}
+
+function ExportButton({
+  disabled,
+  onClick,
+  children,
+}: {
+  disabled?: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      {children}
+    </button>
   );
 }
 
 function Section({
   title,
   description,
+  action,
   children,
 }: {
   title: string;
   description?: string;
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="border-b border-slate-200 px-5 py-4">
-        <h2 className="text-lg font-bold text-slate-900">{title}</h2>
-        {description ? (
-          <p className="mt-1 text-sm text-slate-500">{description}</p>
-        ) : null}
+      <div className="flex flex-col justify-between gap-3 border-b border-slate-200 px-5 py-4 md:flex-row md:items-center">
+        <div>
+          <h2 className="text-lg font-bold text-slate-900">{title}</h2>
+          {description ? (
+            <p className="mt-1 text-sm text-slate-500">{description}</p>
+          ) : null}
+        </div>
+
+        {action ? <div>{action}</div> : null}
       </div>
 
       <div className="p-5">{children}</div>
@@ -171,6 +225,153 @@ export function ReportsPage() {
   const commands = commandsQuery.data;
   const audit = auditQuery.data;
 
+  function exportOverviewCsv() {
+    if (!overview) {
+      return;
+    }
+
+    downloadCsv('relatorio-visao-geral.csv', [
+      {
+        periodo_dias: overview.days,
+        alertas_operacionais_total: overview.operational_alerts.total,
+        alertas_operacionais_ativos: overview.operational_alerts.active,
+        alertas_operacionais_resolvidos: overview.operational_alerts.resolved,
+        notificacoes_total: overview.notifications.total,
+        notificacoes_nao_lidas: overview.notifications.unread,
+        notificacoes_lidas: overview.notifications.read,
+        comandos_total: overview.commands.total,
+        comandos_sucesso: overview.commands.success,
+        comandos_falha: overview.commands.failed,
+        comandos_expirados: overview.commands.timed_out,
+        seguranca_total: overview.security_alerts.total,
+        seguranca_ativos: overview.security_alerts.active,
+        mudancas_software_total: overview.software_changes.total,
+        auditoria_total: overview.audit.total,
+        auditoria_usuarios: overview.audit.users,
+      },
+    ]);
+  }
+
+  function exportOperationalAlertsCsv() {
+    if (!operationalAlerts) {
+      return;
+    }
+
+    downloadCsv(
+      'relatorio-alertas-operacionais-por-agente.csv',
+      operationalAlerts.by_agent.map((item) => ({
+        agente: item.hostname || item.agent_id,
+        agent_id: item.agent_id,
+        versao: item.agent_version || '',
+        total: item.total,
+        ativos: item.active,
+        resolvidos: item.resolved,
+        ignorados: item.ignored,
+        criticos_ativos: item.active_critical,
+        alertas_warning_ativos: item.active_warning,
+        infos_ativos: item.active_info,
+        ultimo_alerta: item.last_alert_at || '',
+      })),
+    );
+  }
+
+  function exportOperationalAlertsByTypeCsv() {
+    if (!operationalAlerts) {
+      return;
+    }
+
+    downloadCsv(
+      'relatorio-alertas-operacionais-por-tipo.csv',
+      operationalAlerts.by_type.map((item) => ({
+        tipo: typeLabel(item.alert_type),
+        tipo_original: item.alert_type,
+        severidade: severityLabel(item.severity),
+        severidade_original: item.severity,
+        status: statusLabel(item.status),
+        status_original: item.status,
+        total: item.total,
+        primeiro_alerta: item.first_seen_at || '',
+        ultimo_alerta: item.last_seen_at || '',
+      })),
+    );
+  }
+
+  function exportCommandsByAgentCsv() {
+    if (!commands) {
+      return;
+    }
+
+    downloadCsv(
+      'relatorio-comandos-por-agente.csv',
+      commands.by_agent.map((item) => ({
+        agente: item.hostname || item.agent_id,
+        agent_id: item.agent_id,
+        versao: item.agent_version || '',
+        total: item.total,
+        sucesso: item.success,
+        falhas: item.failed,
+        expirados: item.timed_out,
+        ultimo_comando: item.last_command_at || '',
+      })),
+    );
+  }
+
+  function exportCommandsByTypeCsv() {
+    if (!commands) {
+      return;
+    }
+
+    downloadCsv(
+      'relatorio-comandos-por-tipo-status.csv',
+      commands.by_type_status.map((item) => ({
+        comando: typeLabel(item.command_type),
+        comando_original: item.command_type,
+        status: statusLabel(item.status),
+        status_original: item.status,
+        total: item.total,
+        primeiro_comando: item.first_created_at || '',
+        ultimo_comando: item.last_created_at || '',
+      })),
+    );
+  }
+
+  function exportAuditByUserCsv() {
+    if (!audit) {
+      return;
+    }
+
+    downloadCsv(
+      'relatorio-auditoria-por-usuario.csv',
+      audit.by_user.map((item) => ({
+        usuario: item.user_email || item.user_id,
+        user_id: item.user_id,
+        total: item.total,
+        acoes_distintas: item.distinct_actions,
+        ultima_atividade: item.last_activity_at || '',
+      })),
+    );
+  }
+
+  function exportRecentAuditCsv() {
+    if (!audit) {
+      return;
+    }
+
+    downloadCsv(
+      'relatorio-atividades-recentes.csv',
+      audit.recent.map((item) => ({
+        usuario: item.user_email || item.user_id,
+        user_id: item.user_id,
+        acao: typeLabel(item.action),
+        acao_original: item.action,
+        tipo_alvo: item.target_type,
+        id_alvo: item.target_id,
+        ip: item.ip_address || '',
+        data: item.created_at || '',
+      })),
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:flex-row lg:items-center">
@@ -186,11 +387,16 @@ export function ReportsPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <label className="text-sm font-medium text-slate-600" htmlFor="days">
-            Período
-          </label>
-          <select
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <ExportButton disabled={!overview} onClick={exportOverviewCsv}>
+            Exportar visão geral
+          </ExportButton>
+
+          <div className="flex items-center gap-3">
+            <label className="text-sm font-medium text-slate-600" htmlFor="days">
+              Período
+            </label>
+            <select
             id="days"
             value={days}
             onChange={(event) => setDays(Number(event.target.value))}
@@ -201,7 +407,8 @@ export function ReportsPage() {
             <option value={90}>Últimos 90 dias</option>
             <option value={180}>Últimos 180 dias</option>
             <option value={365}>Últimos 365 dias</option>
-          </select>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -225,6 +432,7 @@ export function ReportsPage() {
             description={`${formatNumber(
               overview.operational_alerts.active,
             )} ativos`}
+            href="/operational-alerts"
           />
           <Card
             title="Comandos"
@@ -232,6 +440,7 @@ export function ReportsPage() {
             description={`${formatNumber(overview.commands.failed)} falhas / ${formatNumber(
               overview.commands.timed_out,
             )} expirados`}
+            href="/commands"
           />
           <Card
             title="Segurança"
@@ -239,11 +448,13 @@ export function ReportsPage() {
             description={`${formatNumber(
               overview.security_alerts.active,
             )} alertas ativos`}
+            href="/security-alerts"
           />
           <Card
             title="Auditoria"
             value={formatNumber(overview.audit.total)}
             description={`${formatNumber(overview.audit.users)} usuário(s)`}
+            href="/audit"
           />
         </div>
       ) : null}
@@ -251,6 +462,14 @@ export function ReportsPage() {
       <Section
         title="Alertas operacionais por agente"
         description="Agentes com maior concentração de alertas no período."
+        action={
+          <ExportButton
+            disabled={!operationalAlerts?.by_agent.length}
+            onClick={exportOperationalAlertsCsv}
+          >
+            Exportar CSV
+          </ExportButton>
+        }
       >
         {operationalAlerts?.by_agent.length ? (
           <div className="overflow-x-auto">
@@ -268,10 +487,27 @@ export function ReportsPage() {
                 {operationalAlerts.by_agent.map((item) => (
                   <tr key={item.agent_id}>
                     <td className="px-3 py-3">
-                      <p className="font-semibold text-slate-900">
+                      <Link
+                        to={`/agents/${item.agent_id}`}
+                        className="font-semibold text-blue-700 hover:text-blue-900"
+                      >
                         {item.hostname || item.agent_id}
-                      </p>
+                      </Link>
                       <p className="text-xs text-slate-500">{item.agent_id}</p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <Link
+                          to={`/agents/${item.agent_id}`}
+                          className="text-xs font-semibold text-slate-600 hover:text-slate-900"
+                        >
+                          Ver agente
+                        </Link>
+                        <Link
+                          to={`/operational-alerts?agent_id=${item.agent_id}`}
+                          className="text-xs font-semibold text-blue-700 hover:text-blue-900"
+                        >
+                          Ver alertas
+                        </Link>
+                      </div>
                     </td>
                     <td className="px-3 py-3 font-semibold text-slate-700">
                       {formatNumber(item.total)}
@@ -298,13 +534,22 @@ export function ReportsPage() {
       <Section
         title="Alertas por tipo"
         description="Distribuição por tipo, severidade e status."
+        action={
+          <ExportButton
+            disabled={!operationalAlerts?.by_type.length}
+            onClick={exportOperationalAlertsByTypeCsv}
+          >
+            Exportar CSV
+          </ExportButton>
+        }
       >
         {operationalAlerts?.by_type.length ? (
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {operationalAlerts.by_type.map((item) => (
-              <div
+              <Link
                 key={`${item.alert_type}-${item.severity}-${item.status}`}
-                className="rounded-xl border border-slate-200 p-4"
+                to={`/operational-alerts?alert_type=${item.alert_type}&severity=${item.severity}&status=${item.status}`}
+                className="rounded-xl border border-slate-200 p-4 transition hover:border-blue-300 hover:shadow-md"
               >
                 <div className="flex items-center justify-between gap-3">
                   <div>
@@ -328,7 +573,11 @@ export function ReportsPage() {
                 <p className="mt-4 text-2xl font-bold text-slate-900">
                   {formatNumber(item.total)}
                 </p>
-              </div>
+
+                <p className="mt-3 text-sm font-semibold text-blue-700">
+                  Abrir alertas →
+                </p>
+              </Link>
             ))}
           </div>
         ) : (
@@ -339,6 +588,14 @@ export function ReportsPage() {
       <Section
         title="Comandos por agente"
         description="Resumo de execuções remotas por máquina."
+        action={
+          <ExportButton
+            disabled={!commands?.by_agent.length}
+            onClick={exportCommandsByAgentCsv}
+          >
+            Exportar CSV
+          </ExportButton>
+        }
       >
         {commands?.by_agent.length ? (
           <div className="overflow-x-auto">
@@ -357,10 +614,27 @@ export function ReportsPage() {
                 {commands.by_agent.map((item) => (
                   <tr key={item.agent_id}>
                     <td className="px-3 py-3">
-                      <p className="font-semibold text-slate-900">
+                      <Link
+                        to={`/agents/${item.agent_id}`}
+                        className="font-semibold text-blue-700 hover:text-blue-900"
+                      >
                         {item.hostname || item.agent_id}
-                      </p>
+                      </Link>
                       <p className="text-xs text-slate-500">{item.agent_id}</p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <Link
+                          to={`/agents/${item.agent_id}`}
+                          className="text-xs font-semibold text-slate-600 hover:text-slate-900"
+                        >
+                          Ver agente
+                        </Link>
+                        <Link
+                          to={`/commands?agent_id=${item.agent_id}`}
+                          className="text-xs font-semibold text-blue-700 hover:text-blue-900"
+                        >
+                          Ver comandos
+                        </Link>
+                      </div>
                     </td>
                     <td className="px-3 py-3 font-semibold text-slate-700">
                       {formatNumber(item.total)}
@@ -390,13 +664,22 @@ export function ReportsPage() {
       <Section
         title="Comandos por tipo e status"
         description="Agrupamento operacional dos comandos executados."
+        action={
+          <ExportButton
+            disabled={!commands?.by_type_status.length}
+            onClick={exportCommandsByTypeCsv}
+          >
+            Exportar CSV
+          </ExportButton>
+        }
       >
         {commands?.by_type_status.length ? (
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {commands.by_type_status.map((item) => (
-              <div
+              <Link
                 key={`${item.command_type}-${item.status}`}
-                className="rounded-xl border border-slate-200 p-4"
+                to={`/commands?status=${item.status}`}
+                className="rounded-xl border border-slate-200 p-4 transition hover:border-blue-300 hover:shadow-md"
               >
                 <p className="font-semibold text-slate-900">
                   {typeLabel(item.command_type)}
@@ -407,7 +690,10 @@ export function ReportsPage() {
                 <p className="mt-4 text-2xl font-bold text-slate-900">
                   {formatNumber(item.total)}
                 </p>
-              </div>
+                <p className="mt-3 text-sm font-semibold text-blue-700">
+                  Abrir comandos →
+                </p>
+              </Link>
             ))}
           </div>
         ) : (
@@ -418,6 +704,14 @@ export function ReportsPage() {
       <Section
         title="Auditoria por usuário"
         description="Volume de ações auditadas no período."
+        action={
+          <ExportButton
+            disabled={!audit?.by_user.length}
+            onClick={exportAuditByUserCsv}
+          >
+            Exportar CSV
+          </ExportButton>
+        }
       >
         {audit?.by_user.length ? (
           <div className="overflow-x-auto">
@@ -461,6 +755,22 @@ export function ReportsPage() {
       <Section
         title="Atividades recentes"
         description="Últimos registros de auditoria capturados."
+        action={
+          <div className="flex flex-wrap gap-2">
+            <Link
+              to="/audit"
+              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+            >
+              Abrir auditoria
+            </Link>
+            <ExportButton
+              disabled={!audit?.recent.length}
+              onClick={exportRecentAuditCsv}
+            >
+              Exportar CSV
+            </ExportButton>
+          </div>
+        }
       >
         {audit?.recent.length ? (
           <div className="space-y-3">
