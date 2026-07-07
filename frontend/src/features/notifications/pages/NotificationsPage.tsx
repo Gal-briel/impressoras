@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 
 import {
   useArchiveNotification,
@@ -86,6 +86,7 @@ function typeLabel(type: string) {
 }
 
 export function NotificationsPage() {
+  const navigate = useNavigate();
   const [status, setStatus] = useState('unread');
   const [severity, setSeverity] = useState('all');
   const [notificationType, setNotificationType] = useState('all');
@@ -125,6 +126,18 @@ export function NotificationsPage() {
         window.alert(
           `Sincronização concluída. Abertas/atualizadas: ${result.opened_or_refreshed}. Arquivadas: ${result.archived}.`,
         );
+      },
+    });
+  }
+
+  function openNotification(notificationId: string, actionUrl?: string | null) {
+    if (!actionUrl) {
+      return;
+    }
+
+    markReadMutation.mutate(notificationId, {
+      onSettled: () => {
+        navigate(actionUrl);
       },
     });
   }
@@ -332,12 +345,16 @@ export function NotificationsPage() {
 
                   <div className="flex shrink-0 flex-wrap gap-2">
                     {notification.action_url ? (
-                      <Link
-                        to={notification.action_url}
-                        className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                      <button
+                        type="button"
+                        disabled={isMutating}
+                        onClick={() =>
+                          openNotification(notification.id, notification.action_url)
+                        }
+                        className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         Abrir
-                      </Link>
+                      </button>
                     ) : null}
 
                     {notification.status === 'unread' ? (

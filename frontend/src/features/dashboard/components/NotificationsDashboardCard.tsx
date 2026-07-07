@@ -1,8 +1,9 @@
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 import {
   useNotificationsSummary,
   usePersistedNotifications,
+  useMarkNotificationRead,
 } from '../../notifications/hooks/usePersistentNotifications';
 
 function formatDate(value?: string | null) {
@@ -38,7 +39,9 @@ function severityBadgeClass(severity: string) {
 }
 
 export function NotificationsDashboardCard() {
+  const navigate = useNavigate();
   const summaryQuery = useNotificationsSummary();
+  const markReadMutation = useMarkNotificationRead();
   const notificationsQuery = usePersistedNotifications({
     status: 'unread',
     severity: 'all',
@@ -49,6 +52,18 @@ export function NotificationsDashboardCard() {
 
   const summary = summaryQuery.data?.summary;
   const notifications = notificationsQuery.data?.items ?? [];
+
+  function openNotification(notificationId: string, actionUrl?: string | null) {
+    if (!actionUrl) {
+      return;
+    }
+
+    markReadMutation.mutate(notificationId, {
+      onSettled: () => {
+        navigate(actionUrl);
+      },
+    });
+  }
 
   return (
     <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -138,12 +153,15 @@ export function NotificationsDashboardCard() {
                 <span>{formatDate(notification.created_at)}</span>
 
                 {notification.action_url ? (
-                  <Link
-                    to={notification.action_url}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      openNotification(notification.id, notification.action_url)
+                    }
                     className="font-semibold text-blue-700 hover:text-blue-900"
                   >
                     Abrir
-                  </Link>
+                  </button>
                 ) : null}
               </div>
             </article>
