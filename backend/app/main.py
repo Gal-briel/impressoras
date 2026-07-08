@@ -195,3 +195,24 @@ if _FRONTEND_DIST.exists():
         return _FrontendFileResponse(_FRONTEND_DIST / "index.html")
 # --- FRONTEND_STATIC_SERVING_END ---
 
+
+
+# SPRINT 26 - no-cache para HTML do SPA
+# Evita que rotas como /reports carreguem um index.html antigo do navegador/proxy.
+@app.middleware("http")
+async def add_no_cache_headers_for_spa_html(request, call_next):
+    response = await call_next(request)
+
+    content_type = response.headers.get("content-type", "")
+    path = request.url.path
+
+    if (
+        request.method == "GET"
+        and not path.startswith("/api/")
+        and "text/html" in content_type
+    ):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+
+    return response

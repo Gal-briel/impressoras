@@ -69,7 +69,7 @@ async def list_commands(
     status_filter: str | None = Query(default=None, alias="status"),
     agent_id: UUID | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["commands:read"])),
     session: AsyncSession = Depends(get_db_session),
 ):
     stmt = (
@@ -103,7 +103,7 @@ async def list_commands(
 @router.get("/commands/{command_id}")
 async def get_command(
     command_id: UUID,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["commands:read"])),
     session: AsyncSession = Depends(get_db_session),
 ):
     result = await session.execute(
@@ -132,7 +132,7 @@ async def get_command(
 async def list_agent_commands(
     agent_id: UUID,
     limit: int = Query(default=100, ge=1, le=500),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["commands:read"])),
     session: AsyncSession = Depends(get_db_session),
 ):
     result = await session.execute(

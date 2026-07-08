@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     RABBITMQ_URL: str
 
     # Banco de Dados
+    DATABASE_URL: Optional[str] = None
     POSTGRES_USER: str
     POSTGRES_PASSWORD: str
     POSTGRES_SERVER: Optional[str] = None
@@ -37,11 +38,21 @@ class Settings(BaseSettings):
     @property
     def SQLALCHEMY_DATABASE_URI(self) -> str:
         """
-        Monta a URI do PostgreSQL sem duplicar '/' antes do nome do banco.
+        Retorna a URI assíncrona do PostgreSQL.
 
-        Exemplo correto:
-        postgresql+asyncpg://saas:saas@localhost:5432/saas_platform
+        Prioridade:
+        1. DATABASE_URL, útil em produção/Supabase.
+        2. POSTGRES_* do .env local, útil em desenvolvimento Docker.
         """
+        if self.DATABASE_URL:
+            if self.DATABASE_URL.startswith("postgresql+asyncpg://"):
+                return self.DATABASE_URL
+
+            if self.DATABASE_URL.startswith("postgresql://"):
+                return self.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+            return self.DATABASE_URL
+
         server = self.POSTGRES_SERVER or self.POSTGRES_HOST
 
         if not server:

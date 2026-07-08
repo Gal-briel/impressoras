@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
+from app.core.dependencies import require_permissions
 from fastapi import APIRouter, Depends, HTTPException, Query
 from psycopg2.extras import RealDictCursor
 
@@ -45,7 +46,7 @@ def serialize_notification(row: dict[str, Any] | None):
 
 @router.get("/summary")
 def get_notifications_summary(
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["notifications:read"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
     user_id = get_current_user_id(current_user)
@@ -90,7 +91,7 @@ def list_notifications(
     search: str | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["notifications:read"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
     user_id = get_current_user_id(current_user)
@@ -179,7 +180,7 @@ def list_notifications(
 @router.post("/{notification_id}/read")
 def mark_notification_as_read(
     notification_id: UUID,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["notifications:write"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
     user_id = get_current_user_id(current_user)
@@ -218,7 +219,7 @@ def mark_notification_as_read(
 @router.post("/{notification_id}/archive")
 def archive_notification_by_id(
     notification_id: UUID,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["notifications:write"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
     user_id = get_current_user_id(current_user)
@@ -257,7 +258,7 @@ def archive_notification_by_id(
 
 @router.post("/read-all")
 def mark_all_notifications_as_read(
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["notifications:write"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
     user_id = get_current_user_id(current_user)
@@ -292,7 +293,7 @@ def mark_all_notifications_as_read(
 
 @router.post("/sync/operational-alerts")
 def sync_operational_alert_notifications(
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["notifications:write"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
 

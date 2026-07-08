@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.core.dependencies import require_permissions
 from fastapi import APIRouter, Depends, Query
 from psycopg2.extras import RealDictCursor
 
@@ -24,7 +25,7 @@ def serialize_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 @router.get("/overview")
 def get_reports_overview(
     days: int = Query(default=30, ge=1, le=365),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["reports:read"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
 
@@ -145,7 +146,7 @@ def get_reports_overview(
 @router.get("/operational-alerts")
 def get_operational_alerts_report(
     days: int = Query(default=30, ge=1, le=365),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["reports:read"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
 
@@ -237,7 +238,7 @@ def get_operational_alerts_report(
 @router.get("/commands")
 def get_commands_report(
     days: int = Query(default=30, ge=1, le=365),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["reports:read"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
 
@@ -322,7 +323,7 @@ def get_commands_report(
 @router.get("/audit-activity")
 def get_audit_activity_report(
     days: int = Query(default=30, ge=1, le=365),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["reports:read"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
 

@@ -4,10 +4,13 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_db_session
+from app.core.dependencies import get_db_session, require_permissions
 from app.infrastructure.database.models import Agent, Command
 
-router = APIRouter(tags=["dashboard"])
+router = APIRouter(
+    tags=["dashboard"],
+    dependencies=[Depends(require_permissions(["dashboard:read"]))],
+)
 
 
 def _value(value) -> str:

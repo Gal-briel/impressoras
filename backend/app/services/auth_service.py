@@ -21,15 +21,6 @@ def normalize_permissions(permissions: Iterable[str]) -> list[str]:
         normalized.add(permission.replace(":", "."))
         normalized.add(permission.replace(".", ":"))
 
-    if "agents:read" in normalized or "agents.read" in normalized:
-        normalized.update({"printers.read", "audit.read", "settings.read"})
-
-    if "agents:write" in normalized or "agents.write" in normalized:
-        normalized.update({"users.manage"})
-
-    if "commands:execute" in normalized or "commands.execute" in normalized:
-        normalized.update({"commands.execute", "commands:execute"})
-
     return sorted(normalized)
 
 

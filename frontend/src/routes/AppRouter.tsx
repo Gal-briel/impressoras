@@ -18,33 +18,68 @@ import { OperationalAlertsPage } from '../features/operationalAlerts/pages/Opera
 import { NotificationsPage } from '../features/notifications/pages/NotificationsPage';
 import { ReportsPage } from '../features/reports/pages/ReportsPage';
 import { AuditPage } from '../pages/Audit/AuditPage';
+import { ProtectedRoute } from './ProtectedRoute';
 
 export function AppRouter() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
 
-      <Route element={<MainLayout />}>
-        <Route path="/dashboard" element={<DashboardPage />} />
-        <Route path="/security-alerts" element={<SecurityAlertsPage />} />
-        <Route path="/operational-alerts" element={<OperationalAlertsPage />} />
-        <Route path="/notifications" element={<NotificationsPage />} />
-        <Route path="/reports" element={<ReportsPage />} />
-        <Route path="/software-changes" element={<SoftwareInventoryChangesPage />} />
-        <Route path="/agents" element={<AgentsPage />} />
-        <Route path="/inventory" element={<InventoryDevicesPage />} />
-        <Route path="/bulk-commands" element={<BulkCommandsPage />} />
-        <Route path="/command-history" element={<CommandHistoryPage />} />
-        <Route path="/agents/:id" element={<AgentDetailsPage />} />
-        <Route path="/printers" element={<PrintersPage />} />
-        <Route path="/printers/:id" element={<PrinterDetailsPage />} />
-        <Route path="/commands" element={<CommandsPage />} />
-        <Route path="/audit" element={<AuditPage />} />
-        <Route path="/settings" element={<PlaceholderPage title="Configurações" />} />
+      <Route element={<ProtectedRoute />}>
+        <Route element={<MainLayout />}>
+          <Route element={<ProtectedRoute requiredPermission="dashboard:read" />}>
+            <Route path="/dashboard" element={<DashboardPage />} />
+          </Route>
+
+          <Route element={<ProtectedRoute requiredPermission="inventory:read" />}>
+            <Route path="/security-alerts" element={<SecurityAlertsPage />} />
+            <Route path="/software-changes" element={<SoftwareInventoryChangesPage />} />
+            <Route path="/inventory" element={<InventoryDevicesPage />} />
+          </Route>
+
+          <Route element={<ProtectedRoute requiredPermission="operational-alerts:read" />}>
+            <Route path="/operational-alerts" element={<OperationalAlertsPage />} />
+          </Route>
+
+          <Route element={<ProtectedRoute requiredPermission="notifications:read" />}>
+            <Route path="/notifications" element={<NotificationsPage />} />
+          </Route>
+
+          <Route element={<ProtectedRoute requiredPermission="reports:read" />}>
+            <Route path="/reports" element={<ReportsPage />} />
+          </Route>
+
+          <Route element={<ProtectedRoute requiredPermission="agents:read" />}>
+            <Route path="/agents" element={<AgentsPage />} />
+            <Route path="/agents/:id" element={<AgentDetailsPage />} />
+          </Route>
+
+          <Route element={<ProtectedRoute requiredPermission="commands:execute" />}>
+            <Route path="/bulk-commands" element={<BulkCommandsPage />} />
+          </Route>
+
+          <Route element={<ProtectedRoute requiredPermission="commands:read" />}>
+            <Route path="/command-history" element={<CommandHistoryPage />} />
+            <Route path="/commands" element={<CommandsPage />} />
+          </Route>
+
+          <Route element={<ProtectedRoute requiredPermission="printers:read" />}>
+            <Route path="/printers" element={<PrintersPage />} />
+            <Route path="/printers/:id" element={<PrinterDetailsPage />} />
+          </Route>
+
+          <Route element={<ProtectedRoute requiredPermission="audit:read" />}>
+            <Route path="/audit" element={<AuditPage />} />
+          </Route>
+
+          <Route element={<ProtectedRoute requiredPermission="settings:read" />}>
+            <Route path="/settings" element={<PlaceholderPage title="Configurações" />} />
+          </Route>
+        </Route>
       </Route>
 
       <Route path="/" element={<Navigate to="/login" replace />} />
       <Route path="*" element={<Navigate to="/login" replace />} />
-      </Routes>
+    </Routes>
   );
 }

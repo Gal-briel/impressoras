@@ -42,11 +42,25 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Security(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
 
 
+def _permission_aliases(permission: str) -> set[str]:
+    return {
+        permission,
+        permission.replace(":", "."),
+        permission.replace(".", ":"),
+    }
+
+
 def require_permissions(required_permissions: list[str]) -> Callable:
     async def dependency(current_user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
-        for perm in required_permissions:
-            if perm not in current_user.permissions:
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+        granted_permissions = set(current_user.permissions)
+
+        for permission in required_permissions:
+            if not (_permission_aliases(permission) & granted_permissions):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Not enough permissions",
+                )
+
         return current_user
 
     return dependency

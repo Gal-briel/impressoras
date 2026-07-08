@@ -1,4 +1,4 @@
-from app.core.dependencies import require_agent_auth
+from app.core.dependencies import require_agent_auth, require_permissions
 from app.infrastructure.database.models import Agent
 from app.core.database import get_db_session
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -53,7 +53,7 @@ async def list_agents(
     limit: int = Query(default=50, ge=1, le=200),
     status_filter: str | None = Query(default=None, alias="status"),
     search: str | None = None,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["agents:read"])),
     agent_service: AgentService = Depends(get_agent_service),
 ):
     return await agent_service.list_agents(
@@ -93,7 +93,7 @@ async def get_agent_version(
 @router.get("/{agent_id}", response_model=AgentResponse)
 async def get_agent(
     agent_id: UUID,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["agents:read"])),
     agent_service: AgentService = Depends(get_agent_service),
 ):
     response = await agent_service.get_agent(agent_id)
@@ -147,7 +147,7 @@ async def report_agent_event(
 async def revoke_agent(
     agent_id: UUID,
     payload: AgentRevokeRequest,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["agents:write"])),
     agent_service: AgentService = Depends(get_agent_service),
 ):
     try:
@@ -166,7 +166,7 @@ async def revoke_agent(
 @router.post("/{agent_id}/rotate-key", status_code=status.HTTP_200_OK)
 async def rotate_agent_credentials(
     agent_id: UUID,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["agents:write"])),
     agent_service: AgentService = Depends(get_agent_service),
 ):
     try:
@@ -186,7 +186,7 @@ async def rotate_agent_credentials(
 @router.get("/{agent_id}/tags", response_model=AgentTagListResponse, status_code=status.HTTP_200_OK)
 async def get_agent_tags(
     agent_id: UUID,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["agents:read"])),
     tag_service: AgentTagService = Depends(get_agent_tag_service),
 ):
     try:
@@ -199,7 +199,7 @@ async def get_agent_tags(
 async def replace_agent_tags(
     agent_id: UUID,
     payload: AgentTagsReplaceRequest,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["agent-tags:write"])),
     tag_service: AgentTagService = Depends(get_agent_tag_service),
 ):
     try:
@@ -219,7 +219,7 @@ async def replace_agent_tags(
 async def assign_agent_group(
     agent_id: UUID,
     payload: AgentGroupAssignRequest,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["agent-groups:write"])),
     group_service: AgentGroupService = Depends(get_agent_group_service),
 ):
     try:

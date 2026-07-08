@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.schemas.agent_schemas import AgentTagCreateRequest, AgentTagListResponse, AgentTagResponse
-from app.core.dependencies import CurrentUser, get_agent_tag_service, get_current_user
+from app.core.dependencies import CurrentUser, get_agent_tag_service, get_current_user, require_permissions
 from app.services.agent_tag_service import AgentTagService
 
 router = APIRouter(prefix="/agent-tags", tags=["agent-tags"])
@@ -12,7 +12,7 @@ router = APIRouter(prefix="/agent-tags", tags=["agent-tags"])
 
 @router.get("", response_model=AgentTagListResponse)
 async def list_agent_tags(
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["agents:read"])),
     tag_service: AgentTagService = Depends(get_agent_tag_service),
 ):
     return await tag_service.list_tags(tenant_id=UUID(current_user.tenant_id))
@@ -21,7 +21,7 @@ async def list_agent_tags(
 @router.post("", response_model=AgentTagResponse, status_code=status.HTTP_201_CREATED)
 async def create_agent_tag(
     payload: AgentTagCreateRequest,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["agent-tags:write"])),
     tag_service: AgentTagService = Depends(get_agent_tag_service),
 ):
     try:
@@ -33,7 +33,7 @@ async def create_agent_tag(
 @router.delete("/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_agent_tag(
     tag_id: UUID,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["agent-tags:write"])),
     tag_service: AgentTagService = Depends(get_agent_tag_service),
 ):
     try:

@@ -4,14 +4,17 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '../../../components/ui/Button';
 import { Card } from '../../../components/ui/Card';
 import { Input } from '../../../components/ui/Input';
+import { useAuthStore } from '../../../stores/authStore';
 
 const API_URL = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || '/api/v1';
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const setSession = useAuthStore((state) => state.setSession);
+  const clearSession = useAuthStore((state) => state.clearSession);
 
-  const [email, setEmail] = useState('admin@example.com');
-  const [password, setPassword] = useState('admin123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -30,17 +33,27 @@ export function LoginPage() {
         body: JSON.stringify({ email, password }),
       });
 
-      const data = await response.json();
+      const rawBody = await response.text();
+      const data = rawBody ? JSON.parse(rawBody) : null;
 
       if (!response.ok) {
-        throw new Error(data.detail || 'Falha no login');
+        throw new Error(data?.detail || `Falha no login (${response.status})`);
       }
 
+      if (!data?.access_token || !data?.user) {
+        throw new Error('Resposta de login inválida ou vazia');
+      }
+
+      clearSession();
+
+      setSession(data.user, data.access_token, data.refresh_token || '');
+
+      // Compatibilidade com clientes antigos que ainda leem tokens soltos.
       localStorage.setItem('access_token', data.access_token);
       localStorage.setItem('refresh_token', data.refresh_token || '');
       localStorage.setItem('user', JSON.stringify(data.user || null));
 
-      navigate('/dashboard');
+      navigate('/dashboard', { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro inesperado');
     } finally {

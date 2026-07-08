@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from psycopg2.extras import Json, RealDictCursor
 from pydantic import BaseModel
 
-from app.core.dependencies import CurrentUser, get_current_user
+from app.core.dependencies import CurrentUser, get_current_user, require_permissions
 
 
 def get_sync_database_url() -> str:
@@ -128,7 +128,7 @@ def get_alert_or_404(cur, tenant_id: str, alert_id: str) -> dict[str, Any]:
 
 @router.get("/summary")
 def get_operational_alerts_summary(
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["operational-alerts:read"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
 
@@ -221,7 +221,7 @@ def list_operational_alerts(
     search: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["operational-alerts:read"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
 
@@ -343,7 +343,7 @@ def list_operational_alerts(
 @router.get("/{alert_id}")
 def get_operational_alert(
     alert_id: UUID,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["operational-alerts:read"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
 
@@ -358,7 +358,7 @@ def get_operational_alert(
 def resolve_operational_alert(
     alert_id: UUID,
     payload: AlertActionPayload | None = None,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["operational-alerts:write"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
     note = payload.note if payload else None
@@ -410,7 +410,7 @@ def resolve_operational_alert(
 def ignore_operational_alert(
     alert_id: UUID,
     payload: AlertActionPayload | None = None,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["operational-alerts:write"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
     note = payload.note if payload else None
@@ -461,7 +461,7 @@ def ignore_operational_alert(
 @router.post("/sync/offline-agents")
 def sync_offline_agent_alerts(
     offline_after_minutes: int = Query(default=15, ge=1, le=1440),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["operational-alerts:write"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
 
@@ -483,7 +483,7 @@ def sync_offline_agent_alerts(
 
 @router.post("/sync/security-alerts")
 def sync_security_operational_alerts(
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["operational-alerts:write"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
 
@@ -505,7 +505,7 @@ def sync_security_operational_alerts(
 
 @router.post("/sync/software-changes")
 def sync_software_change_operational_alerts(
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["operational-alerts:write"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
 
@@ -528,7 +528,7 @@ def sync_software_change_operational_alerts(
 @router.post("/sync/all")
 def sync_all_operational_alerts(
     offline_after_minutes: int = 15,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["operational-alerts:write"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
 
