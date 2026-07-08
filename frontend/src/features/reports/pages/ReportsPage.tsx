@@ -376,9 +376,6 @@ export function ReportsPage() {
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:flex-row lg:items-center">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-wide text-blue-700">
-            Sprint 24
-          </p>
           <h1 className="mt-1 text-2xl font-bold text-slate-900">
             Relatórios
           </h1>

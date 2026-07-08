@@ -7,6 +7,10 @@ export function useAgent(agentId?: string) {
     queryKey: ['agents', agentId],
     queryFn: () => getAgentById(agentId || ''),
     enabled: Boolean(agentId),
-    refetchInterval: 30000,
+    staleTime: 0,
+    refetchInterval: 15000,
+    refetchIntervalInBackground: true,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   });
 }

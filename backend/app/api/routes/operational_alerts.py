@@ -6,10 +6,30 @@ from uuid import UUID
 
 import psycopg2
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import Json, RealDictCursor
 from pydantic import BaseModel
 
 from app.core.dependencies import CurrentUser, get_current_user
+
+
+def get_sync_database_url() -> str:
+    database_url = (
+        os.getenv("SYNC_DATABASE_URL")
+        or os.getenv("DATABASE_URL")
+        or ""
+    )
+
+    if database_url.startswith("postgresql+asyncpg://"):
+        database_url = database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+
+    if not database_url:
+        raise RuntimeError("Database URL not configured. Set SYNC_DATABASE_URL or DATABASE_URL.")
+
+    return database_url
+
+
+def get_connection():
+    return psycopg2.connect(get_sync_database_url())
 
 
 router = APIRouter(
@@ -17,18 +37,10 @@ router = APIRouter(
     tags=["Operational alerts"],
 )
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://saas:saas@localhost:5432/saas_platform",
-)
-
 
 class AlertActionPayload(BaseModel):
     note: str | None = None
 
-
-def get_connection():
-    return psycopg2.connect(DATABASE_URL)
 
 
 def serialize_value(value: Any) -> Any:

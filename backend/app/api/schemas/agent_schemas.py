@@ -88,6 +88,10 @@ class AgentResponse(BaseModel):
     id: UUID4
     tenant_id: UUID4
     group_id: Optional[UUID4] = None
+    group_name: Optional[str] = None
+    domain_name: Optional[str] = None
+    grouping_source: Optional[str] = None
+    grouping_status: Optional[str] = None
     hostname: str
     mac_address: str
     os_version: str

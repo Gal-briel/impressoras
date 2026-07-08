@@ -4,7 +4,7 @@ import { Card } from '../../../components/ui/Card';
 import { PageHeader } from '../../../components/ui/PageHeader';
 import { StatCard } from '../../../components/ui/StatCard';
 import { AgentsFilters } from '../components/AgentsFilters';
-import { AgentsTable } from '../components/AgentsTable';
+import { AgentsGroupedView } from '../components/AgentsGroupedView';
 import { getAgentDisplayStatus } from '../components/AgentStatusBadge';
 import { useAgents } from '../hooks/useAgents';
 import type { Agent, AgentStatusFilter } from '../types';
@@ -46,6 +46,9 @@ function matchesSearch(agent: Agent, search: string) {
     agent.os_version,
     agent.agent_version,
     agent.mac_address,
+    agent.group_name,
+    agent.domain_name,
+    agent.grouping_status,
     agent.id,
   ]
     .filter(Boolean)
@@ -71,30 +74,62 @@ function matchesStatus(agent: Agent, status: AgentStatusFilter) {
   return getAgentDisplayStatus(agent) === status;
 }
 
+function getAgentGroupKey(agent: Agent) {
+  return agent.group_id || agent.group_name || 'sem-grupo';
+}
+
 export function AgentsPage() {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<AgentStatusFilter>('all');
+  const [groupFilter, setGroupFilter] = useState('all');
 
   const { data, isLoading, isError, error, refetch, isFetching } = useAgents();
 
   const agents = data?.items || [];
 
+  const groupOptions = useMemo(() => {
+    const groups = new Map<string, string>();
+
+    for (const agent of agents) {
+      groups.set(getAgentGroupKey(agent), agent.group_name || 'Sem grupo');
+    }
+
+    return Array.from(groups.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [agents]);
+
   const filteredAgents = useMemo(() => {
     return agents.filter((agent) => {
-      return matchesSearch(agent, search) && matchesStatus(agent, status);
+      const matchesGroup =
+        groupFilter === 'all' || getAgentGroupKey(agent) === groupFilter;
+
+      return (
+        matchesGroup &&
+        matchesSearch(agent, search) &&
+        matchesStatus(agent, status)
+      );
     });
-  }, [agents, search, status]);
+  }, [agents, search, status, groupFilter]);
 
   const totalAgents = agents.length;
   const onlineAgents = agents.filter(isAgentOnline).length;
-  const approvedAgents = agents.filter((agent) => String(agent.enrollment_status || '').toLowerCase() === 'approved').length;
-  const revokedAgents = agents.filter((agent) => getAgentDisplayStatus(agent) === 'revoked').length;
+  const approvedAgents = agents.filter(
+    (agent) => String(agent.enrollment_status || '').toLowerCase() === 'approved',
+  ).length;
+  const revokedAgents = agents.filter(
+    (agent) => getAgentDisplayStatus(agent) === 'revoked',
+  ).length;
+  const groupsTotal = groupOptions.length;
+  const reviewAgents = agents.filter(
+    (agent) => agent.grouping_status === 'requires_review',
+  ).length;
 
   return (
     <section>
       <PageHeader
         title="Agentes"
-        description="Gerencie e acompanhe os computadores conectados ao ambiente."
+        description="Gerencie os computadores conectados, organizados por empresa ou grupo."
         actions={
           <button
             onClick={() => refetch()}
@@ -105,7 +140,7 @@ export function AgentsPage() {
         }
       />
 
-      <div className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
         <StatCard
           title="Total de agentes"
           value={totalAgents}
@@ -133,15 +168,48 @@ export function AgentsPage() {
           description="Bloqueados por segurança"
           icon="⛔"
         />
+
+        <StatCard
+          title="Empresas/grupos"
+          value={groupsTotal}
+          description="Agrupamentos ativos"
+          icon="🏢"
+        />
+
+        <StatCard
+          title="A revisar"
+          value={reviewAgents}
+          description="Sem domínio detectado"
+          icon="⚠️"
+        />
       </div>
 
       <Card className="mb-6 p-5">
-        <AgentsFilters
-          search={search}
-          status={status}
-          onSearchChange={setSearch}
-          onStatusChange={setStatus}
-        />
+        <div className="grid gap-4 xl:grid-cols-[1fr_260px]">
+          <AgentsFilters
+            search={search}
+            status={status}
+            onSearchChange={setSearch}
+            onStatusChange={setStatus}
+          />
+
+          <label className="text-sm font-medium text-slate-700">
+            Empresa/Grupo
+            <select
+              value={groupFilter}
+              onChange={(event) => setGroupFilter(event.target.value)}
+              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            >
+              <option value="all">Todos os grupos</option>
+
+              {groupOptions.map((group) => (
+                <option key={group.id} value={group.id}>
+                  {group.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       </Card>
 
       {isError && (
@@ -167,10 +235,14 @@ export function AgentsPage() {
         <>
           <div className="mb-3 text-sm text-slate-500">
             Exibindo <strong>{filteredAgents.length}</strong> de{' '}
-            <strong>{totalAgents}</strong> agentes.
+            <strong>{totalAgents}</strong> agentes em{' '}
+            <strong>
+              {groupFilter === 'all' ? groupOptions.length : 1}
+            </strong>{' '}
+            grupo(s).
           </div>
 
-          <AgentsTable agents={filteredAgents} />
+          <AgentsGroupedView agents={filteredAgents} />
         </>
       )}
     </section>

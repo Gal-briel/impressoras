@@ -1,41 +1,81 @@
-import { AgentSecurityHistorySection } from '../components/AgentSecurityHistorySection';
-import { useState } from 'react';
+import { ReactNode, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 
-import { Badge } from '../../../components/ui/Badge';
 import { Card } from '../../../components/ui/Card';
 import { PageHeader } from '../../../components/ui/PageHeader';
-import { AgentCommandsPanel } from '../components/AgentCommandsPanel';
-import { AgentDetailsTabs, type TabKey } from '../components/AgentDetailsTabs';
-import { AgentOperationalAlertsSection } from '../components/AgentOperationalAlertsSection';
-import { AgentEventsPanel } from '../components/AgentEventsPanel';
-import { AgentInfoCard } from '../components/AgentInfoCard';
-import { AgentPrintersPanel } from '../components/AgentPrintersPanel';
-import { useAgent } from '../hooks/useAgent';
-import { AgentHealthSection } from '../components/AgentHealthSection';
-import { AgentDiagnosticsSection } from '../components/AgentDiagnosticsSection';
-import { AgentInventorySection } from '../components/AgentInventorySection';
-import { AgentUpdateSection } from '../components/AgentUpdateSection';
 import { AgentAdminActionsSection } from '../components/AgentAdminActionsSection';
-import { AgentSecurityInventorySection } from '../components/AgentSecurityInventorySection';
-import { AgentSoftwareInventoryHistorySection } from '../components/AgentSoftwareInventoryHistorySection';
-import { AgentSoftwareChangesSection } from '../components/AgentSoftwareChangesSection';
+import { AgentCommandsPanel } from '../components/AgentCommandsPanel';
+import { AgentDiagnosticsSection } from '../components/AgentDiagnosticsSection';
+import { AgentEventsPanel } from '../components/AgentEventsPanel';
+import { AgentGroupAssignmentSection } from '../components/AgentGroupAssignmentSection';
+import { AgentHealthSection } from '../components/AgentHealthSection';
+import { AgentInfoCard } from '../components/AgentInfoCard';
+import { AgentInventorySection } from '../components/AgentInventorySection';
+import { AgentOperationalAlertsSection } from '../components/AgentOperationalAlertsSection';
 import { AgentPersistedSecurityAlertsSection } from '../components/AgentPersistedSecurityAlertsSection';
+import { AgentPrintersPanel } from '../components/AgentPrintersPanel';
+import { AgentSecurityHistorySection } from '../components/AgentSecurityHistorySection';
+import { AgentSecurityInventorySection } from '../components/AgentSecurityInventorySection';
+import { AgentSoftwareChangesSection } from '../components/AgentSoftwareChangesSection';
+import { AgentSoftwareInventoryHistorySection } from '../components/AgentSoftwareInventoryHistorySection';
+import { AgentUpdateSection } from '../components/AgentUpdateSection';
+import { useAgent } from '../hooks/useAgent';
 
-function PlaceholderTabContent({
+type ExpandableSectionProps = {
+  title: string;
+  description?: string;
+  badge?: string;
+  defaultOpen?: boolean;
+  children: ReactNode;
+};
+
+function ExpandableSection({
   title,
   description,
-}: {
-  title: string;
-  description: string;
-}) {
+  badge,
+  defaultOpen = false,
+  children,
+}: ExpandableSectionProps) {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
 
-return (
-    <Card className="p-6">
-      <Badge variant="info">Preparado</Badge>
-      <h2 className="mt-4 text-lg font-semibold text-slate-950">{title}</h2>
-      <p className="mt-2 text-sm leading-6 text-slate-600">{description}</p>
+  return (
+    <Card className="overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setIsOpen((current) => !current)}
+        className="flex w-full flex-col gap-3 bg-white px-5 py-4 text-left transition hover:bg-slate-50 md:flex-row md:items-center md:justify-between"
+      >
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-base font-bold text-slate-950">
+              {title}
+            </h2>
+
+            {badge ? (
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-700">
+                {badge}
+              </span>
+            ) : null}
+          </div>
+
+          {description ? (
+            <p className="mt-1 text-sm text-slate-500">
+              {description}
+            </p>
+          ) : null}
+        </div>
+
+        <span className="text-sm font-semibold text-blue-700">
+          {isOpen ? 'Recolher' : 'Abrir'}
+        </span>
+      </button>
+
+      {isOpen ? (
+        <div className="border-t border-slate-200 bg-slate-50 p-4">
+          {children}
+        </div>
+      ) : null}
     </Card>
   );
 }
@@ -43,9 +83,15 @@ return (
 export function AgentDetailsPage() {
   const { id } = useParams();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<TabKey>('general');
 
-  const { data: agent, isLoading, isError, error, refetch, isFetching } = useAgent(id);
+  const {
+    data: agent,
+    isLoading,
+    isError,
+    error,
+    refetch,
+    isFetching,
+  } = useAgent(id);
 
   async function refreshAgentPage() {
     if (!id) {
@@ -56,6 +102,7 @@ export function AgentDetailsPage() {
     await Promise.all([
       refetch(),
       queryClient.invalidateQueries({ queryKey: ['agents'] }),
+      queryClient.invalidateQueries({ queryKey: ['agent', id] }),
       queryClient.invalidateQueries({ queryKey: ['agents', id] }),
       queryClient.invalidateQueries({ queryKey: ['agent-health', id] }),
       queryClient.invalidateQueries({ queryKey: ['agent-diagnostics', id] }),
@@ -74,7 +121,7 @@ export function AgentDetailsPage() {
     <section>
       <PageHeader
         title="Detalhes do Agente"
-        description="Visão centralizada do agente selecionado."
+        description="Informações organizadas por categoria para facilitar a operação."
         actions={
           <div className="flex items-center gap-2">
             <Link
@@ -94,13 +141,13 @@ export function AgentDetailsPage() {
         }
       />
 
-      {isLoading && (
+      {isLoading ? (
         <Card className="h-64 animate-pulse bg-slate-100 p-6">
           <div />
         </Card>
-      )}
+      ) : null}
 
-      {isError && (
+      {isError ? (
         <Card className="border-red-200 bg-red-50 p-6">
           <p className="text-sm font-semibold text-red-700">
             Não foi possível carregar os detalhes do agente.
@@ -109,60 +156,113 @@ export function AgentDetailsPage() {
             {error instanceof Error ? error.message : 'Erro desconhecido'}
           </pre>
         </Card>
-      )}
+      ) : null}
 
-      {!isLoading && !isError && agent && (
-        <div className="space-y-6">
-          <AgentInfoCard agent={agent} />
+      {!isLoading && !isError && agent ? (
+        <div className="space-y-4">
+          <ExpandableSection
+            title="Resumo do agente"
+            description="Identificação, sistema operacional, status e dados principais."
+            defaultOpen
+          >
+            <AgentInfoCard agent={agent} />
+          </ExpandableSection>
 
-        <AgentHealthSection />
+          <ExpandableSection
+            title="Empresa / Grupo"
+            description="Classificação do agente por empresa, domínio ou grupo manual."
+            badge={agent.grouping_status === 'requires_review' ? 'Revisar' : agent.group_name || undefined}
+            defaultOpen
+          >
+            <AgentGroupAssignmentSection agent={agent} />
+          </ExpandableSection>
 
-        <AgentUpdateSection />
+          <ExpandableSection
+            title="Alertas operacionais"
+            description="Eventos operacionais, falhas e automações vinculadas ao agente."
+            defaultOpen
+          >
+            <AgentOperationalAlertsSection agentId={agent.id} />
+          </ExpandableSection>
 
-        <AgentAdminActionsSection agentId={agent.id} />
+          <ExpandableSection
+            title="Saúde e status"
+            description="Informações de saúde, conectividade e estado atual do agente."
+          >
+            <AgentHealthSection />
+          </ExpandableSection>
 
-        <AgentOperationalAlertsSection agentId={agent.id} />
+          <ExpandableSection
+            title="Inventário patrimonial"
+            description="Dados patrimoniais e informações coletadas do dispositivo."
+          >
+            <AgentInventorySection />
+          </ExpandableSection>
 
-        <AgentPersistedSecurityAlertsSection agentId={id} />
+          <ExpandableSection
+            title="Hardware"
+            description="Diagnóstico técnico e inventário avançado de hardware."
+          >
+            <AgentDiagnosticsSection />
+          </ExpandableSection>
 
-        <AgentSecurityInventorySection agentId={agent.id} />
-
-        <AgentSoftwareInventoryHistorySection agentId={id} />
-
-        <AgentSoftwareChangesSection agentId={id} />
-
-        <AgentSecurityHistorySection agentId={id} />
-
-        <AgentInventorySection />
-
-        <AgentDiagnosticsSection />
-
-          <Card className="p-6">
-            <AgentDetailsTabs activeTab={activeTab} onChange={setActiveTab} />
-
-            <div className="mt-6">
-              {activeTab === 'general' && (
-                <PlaceholderTabContent
-                  title="Resumo geral do agente"
-                  description="As informações principais já estão carregadas acima. Esta aba ficará reservada para inventário expandido, capacidades do agente e metadados operacionais."
-                />
-              )}
-
-              {activeTab === 'printers' && (
-                <AgentPrintersPanel agentId={agent.id} />
-              )}
-
-              {activeTab === 'events' && (
-                <AgentEventsPanel agentId={agent.id} />
-              )}
-
-              {activeTab === 'commands' && (
-                <AgentCommandsPanel agentId={agent.id} />
-              )}
+          <ExpandableSection
+            title="Segurança"
+            description="Inventário de segurança, BitLocker, firewall, antivírus, atualizações e alertas."
+          >
+            <div className="space-y-4">
+              <AgentPersistedSecurityAlertsSection agentId={agent.id} />
+              <AgentSecurityInventorySection agentId={agent.id} />
+              <AgentSecurityHistorySection agentId={agent.id} />
             </div>
-          </Card>
+          </ExpandableSection>
+
+          <ExpandableSection
+            title="Programas instalados"
+            description="Histórico de inventário de softwares instalados."
+          >
+            <AgentSoftwareInventoryHistorySection agentId={agent.id} />
+          </ExpandableSection>
+
+          <ExpandableSection
+            title="Mudanças de software"
+            description="Softwares adicionados, removidos ou alterados entre coletas."
+          >
+            <AgentSoftwareChangesSection agentId={agent.id} />
+          </ExpandableSection>
+
+          <ExpandableSection
+            title="Impressoras"
+            description="Impressoras coletadas e ações relacionadas."
+          >
+            <AgentPrintersPanel agentId={agent.id} />
+          </ExpandableSection>
+
+          <ExpandableSection
+            title="Comandos"
+            description="Comandos enviados especificamente para este agente."
+          >
+            <AgentCommandsPanel agentId={agent.id} />
+          </ExpandableSection>
+
+          <ExpandableSection
+            title="Eventos"
+            description="Histórico de eventos enviados pelo agente."
+          >
+            <AgentEventsPanel agentId={agent.id} />
+          </ExpandableSection>
+
+          <ExpandableSection
+            title="Administração e atualização"
+            description="Ações administrativas, atualização e controle do agente."
+          >
+            <div className="space-y-4">
+              <AgentUpdateSection />
+              <AgentAdminActionsSection agentId={agent.id} />
+            </div>
+          </ExpandableSection>
         </div>
-      )}
+      ) : null}
     </section>
   );
 }

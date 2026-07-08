@@ -103,29 +103,6 @@ export function DashboardPage() {
       </div>
 
       <div className="mt-8 grid gap-4 lg:grid-cols-2">
-        <Card className="p-6">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-slate-950">Status da sprint</h2>
-            <Badge variant="success">Sprint 3</Badge>
-          </div>
-
-          <p className="mt-3 text-sm leading-6 text-slate-600">
-            Dashboard inicial implementado com React Query, Axios e dados reais dos endpoints
-            disponíveis. A estrutura está preparada para migração futura para um endpoint dedicado
-            de resumo operacional.
-          </p>
-        </Card>
-
-        <Card className="p-6">
-          <h2 className="text-lg font-semibold text-slate-950">Próximas integrações</h2>
-
-          <ul className="mt-3 space-y-2 text-sm text-slate-600">
-            <li>• Cards com métricas vindas de /dashboard/summary</li>
-            <li>• Atualização em tempo real via WebSocket</li>
-            <li>• Alertas de agentes offline</li>
-            <li>• Atalhos para comandos e detalhes de agentes</li>
-          </ul>
-        </Card>
       </div>
     </section>
   );

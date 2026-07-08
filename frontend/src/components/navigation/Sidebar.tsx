@@ -1,5 +1,6 @@
-import { useNotificationsSummary } from '../../features/notifications/hooks/usePersistentNotifications';
 import { NavLink } from 'react-router-dom';
+
+import { useNotificationsSummary } from '../../features/notifications/hooks/usePersistentNotifications';
 
 const items = [
   { label: 'Dashboard', path: '/dashboard' },
@@ -21,14 +22,20 @@ const items = [
 export function Sidebar() {
   const notificationsSummaryQuery = useNotificationsSummary();
   const unreadNotifications = notificationsSummaryQuery.data?.summary.unread_total ?? 0;
+
   return (
-    <aside className="hidden min-h-screen w-72 border-r border-slate-800 bg-slate-950 px-4 py-5 text-white lg:block">
+    <aside className="sticky top-0 hidden h-screen w-72 shrink-0 overflow-y-auto border-r border-slate-800 bg-slate-950 px-4 py-5 text-white lg:block">
       <div className="mb-8 px-2">
         <div className="flex items-center gap-3">
-          <div className="grid h-10 w-10 place-items-center rounded-xl bg-blue-600 font-bold">SP</div>
+          <div className="grid h-10 w-10 place-items-center rounded-xl bg-blue-600 font-bold">
+            GB
+          </div>
+
           <div>
-            <h2 className="text-sm font-bold uppercase tracking-wide">SaaS Platform</h2>
-            <p className="text-xs text-slate-400">Remote Management</p>
+            <h2 className="text-sm font-bold uppercase tracking-wide">
+              Gabriel
+            </h2>
+            <p className="text-xs text-slate-400">Gestão de agentes</p>
           </div>
         </div>
       </div>
@@ -40,19 +47,20 @@ export function Sidebar() {
             to={item.path}
             className={({ isActive }) =>
               [
-                'flex items-center rounded-xl px-3 py-2.5 text-sm font-medium transition',
+                'flex items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition',
                 isActive
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-slate-300 hover:bg-slate-900 hover:text-white',
               ].join(' ')
             }
           >
-            <span><span>{item.label}</span>
-              {item.path === '/notifications' && unreadNotifications > 0 ? (
-                <span className="ml-auto rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold text-white">
-                  {unreadNotifications}
-                </span>
-              ) : null}</span>
+            <span>{item.label}</span>
+
+            {item.path === '/notifications' && unreadNotifications > 0 ? (
+              <span className="rounded-full bg-red-600 px-2 py-0.5 text-xs font-bold text-white">
+                {unreadNotifications}
+              </span>
+            ) : null}
           </NavLink>
         ))}
       </nav>

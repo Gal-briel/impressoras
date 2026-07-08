@@ -31,7 +31,7 @@ async def dashboard_summary(
     session: AsyncSession = Depends(get_db_session),
 ):
     now = datetime.now(timezone.utc)
-    online_cutoff = now - timedelta(minutes=2)
+    online_cutoff = now - timedelta(minutes=5)
 
     agents_result = await session.execute(select(Agent))
     agents = list(agents_result.scalars().all())
