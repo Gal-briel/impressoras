@@ -20,6 +20,7 @@ from app.api.routes import (
     auth,
     commands,
     printers,
+    settings as settings_routes,
     websockets,
 )
 from app.core.config import settings
@@ -93,6 +94,7 @@ app.include_router(agents.router, prefix=settings.API_V1_STR)
 app.include_router(commands.router, prefix=settings.API_V1_STR)
 app.include_router(dashboard.router, prefix=settings.API_V1_STR)
 app.include_router(printers.router, prefix=settings.API_V1_STR)
+app.include_router(settings_routes.router, prefix=settings.API_V1_STR)
 app.include_router(agent_tags.router, prefix=settings.API_V1_STR)
 app.include_router(agent_groups.router, prefix=settings.API_V1_STR)
 app.include_router(agent_health.router, prefix=settings.API_V1_STR)

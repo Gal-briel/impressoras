@@ -8,7 +8,6 @@ import { DashboardPage } from '../features/dashboard/pages/DashboardPage';
 import { PrinterDetailsPage } from '../features/printers/pages/PrinterDetailsPage';
 import { PrintersPage } from '../features/printers/pages/PrintersPage';
 import { MainLayout } from '../layouts/MainLayout';
-import { PlaceholderPage } from '../pages/PlaceholderPage';
 import { InventoryDevicesPage } from '../features/inventory/pages/InventoryDevicesPage';
 import { BulkCommandsPage } from '../features/bulk-commands/pages/BulkCommandsPage';
 import { CommandHistoryPage } from '../features/command-history/pages/CommandHistoryPage';
@@ -18,6 +17,9 @@ import { OperationalAlertsPage } from '../features/operationalAlerts/pages/Opera
 import { NotificationsPage } from '../features/notifications/pages/NotificationsPage';
 import { ReportsPage } from '../features/reports/pages/ReportsPage';
 import { AuditPage } from '../pages/Audit/AuditPage';
+import { SettingsPage } from '../pages/Settings/SettingsPage';
+import { UsersPage } from '../pages/Settings/UsersPage';
+import { RolesPage } from '../pages/Settings/RolesPage';
 import { ProtectedRoute } from './ProtectedRoute';
 
 export function AppRouter() {
@@ -73,7 +75,12 @@ export function AppRouter() {
           </Route>
 
           <Route element={<ProtectedRoute requiredPermission="settings:read" />}>
-            <Route path="/settings" element={<PlaceholderPage title="Configurações" />} />
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/settings/roles" element={<RolesPage />} />
+          </Route>
+
+          <Route element={<ProtectedRoute requiredPermission="users:manage" />}>
+            <Route path="/settings/users" element={<UsersPage />} />
           </Route>
         </Route>
       </Route>
