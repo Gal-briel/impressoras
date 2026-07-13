@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import ipaddress
 from typing import Any
 from uuid import UUID
 
@@ -8,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
 from app.core.dependencies import CurrentUser, get_current_user, require_agent_auth
-from app.infrastructure.database.models import Agent, Printer
+from app.infrastructure.database.models import Agent, Printer, AgentGroup
 from app.core.dependencies import require_agent_auth
 
 router = APIRouter(tags=["printers"])
@@ -89,7 +90,47 @@ def _infer_is_online(status_value: str | None):
     return None
 
 
-def _printer_to_dict(printer: Printer, agent_hostname: str | None = None) -> dict:
+
+def _calculate_agent_network(ip_value: str | None) -> str | None:
+    if not ip_value:
+        return None
+
+    try:
+        ip = ipaddress.ip_address(str(ip_value).strip())
+    except ValueError:
+        return None
+
+    if ip.version != 4:
+        return None
+
+    try:
+        return str(ipaddress.ip_network(f"{ip}/24", strict=False))
+    except ValueError:
+        return None
+
+
+def _agent_ip(agent: Agent | None) -> str | None:
+    if not agent:
+        return None
+
+    return _get_attr(
+        agent,
+        ["internal_ip", "last_ip", "ip_address", "ip"],
+        None,
+    )
+
+
+def _printer_to_dict(printer: Printer, agent: Agent | None = None, agent_hostname: str | None = None, agent_group_name: str | None = None) -> dict:
+    if agent is not None:
+        agent_hostname = _get_attr(agent, ["hostname", "name"], agent_hostname)
+
+    agent_ip = _agent_ip(agent)
+    agent_network = _calculate_agent_network(agent_ip)
+    agent_domain_name = _get_attr(agent, ["domain_name"], None)
+    agent_group_id = _get_attr(agent, ["group_id"], None)
+    agent_grouping_source = _get_attr(agent, ["grouping_source"], None)
+    agent_grouping_status = _get_attr(agent, ["grouping_status"], None)
+
     name = _get_attr(printer, ["name", "printer_name"], "Impressora sem nome")
     driver = _get_attr(printer, ["driver_name", "driver"], None)
     port = _get_attr(printer, ["port_name", "port"], None)
@@ -105,6 +146,15 @@ def _printer_to_dict(printer: Printer, agent_hostname: str | None = None) -> dic
         "tenant_id": str(printer.tenant_id),
         "agent_id": str(printer.agent_id),
         "agent_hostname": agent_hostname,
+        "agent_ip": agent_ip,
+        "agent_network": agent_network,
+        "network": agent_network,
+        "agent_group_id": str(agent_group_id) if agent_group_id else None,
+        "agent_group_name": agent_group_name or agent_domain_name,
+        "agent_domain_name": agent_domain_name,
+        "agent_grouping_source": agent_grouping_source,
+        "agent_grouping_status": agent_grouping_status,
+        "company_group": agent_group_name or agent_domain_name,
         "name": name,
         "printer_name": name,
         "driver_name": driver,
@@ -155,8 +205,9 @@ async def list_printers(
     tenant_id = _as_uuid(current_user.tenant_id)
 
     stmt = (
-        select(Printer, Agent.hostname)
+        select(Printer, Agent, AgentGroup.name)
         .join(Agent, Printer.agent_id == Agent.id)
+        .outerjoin(AgentGroup, Agent.group_id == AgentGroup.id)
         .where(Printer.tenant_id == tenant_id)
     )
 
@@ -174,8 +225,8 @@ async def list_printers(
     rows = result.all()
 
     items = [
-        _printer_to_dict(printer, agent_hostname)
-        for printer, agent_hostname in rows
+        _printer_to_dict(printer, agent=agent, agent_group_name=agent_group_name)
+        for printer, agent, agent_group_name in rows
     ]
 
     return {
@@ -193,8 +244,9 @@ async def get_printer(
     tenant_id = _as_uuid(current_user.tenant_id)
 
     result = await session.execute(
-        select(Printer, Agent.hostname)
+        select(Printer, Agent, AgentGroup.name)
         .join(Agent, Printer.agent_id == Agent.id)
+        .outerjoin(AgentGroup, Agent.group_id == AgentGroup.id)
         .where(
             Printer.id == printer_id,
             Printer.tenant_id == tenant_id,
@@ -211,7 +263,7 @@ async def get_printer(
 
     printer, agent_hostname = row
 
-    return _printer_to_dict(printer, agent_hostname)
+    return _printer_to_dict(printer, agent=agent, agent_group_name=agent_group_name)
 
 
 @router.get("/agents/{agent_id}/printers")
@@ -226,8 +278,9 @@ async def list_agent_printers(
     await _get_agent_or_404(session, tenant_id, agent_id)
 
     stmt = (
-        select(Printer, Agent.hostname)
+        select(Printer, Agent, AgentGroup.name)
         .join(Agent, Printer.agent_id == Agent.id)
+        .outerjoin(AgentGroup, Agent.group_id == AgentGroup.id)
         .where(
             Printer.tenant_id == tenant_id,
             Printer.agent_id == agent_id,
@@ -248,8 +301,8 @@ async def list_agent_printers(
     rows = result.all()
 
     items = [
-        _printer_to_dict(printer, agent_hostname)
-        for printer, agent_hostname in rows
+        _printer_to_dict(printer, agent=agent, agent_group_name=agent_group_name)
+        for printer, agent, agent_group_name in rows
     ]
 
     return {

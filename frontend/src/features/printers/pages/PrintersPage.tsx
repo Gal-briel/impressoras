@@ -2,115 +2,314 @@ import { useMemo, useState } from 'react';
 
 import { Badge } from '../../../components/ui/Badge';
 import { Card } from '../../../components/ui/Card';
-import { Input } from '../../../components/ui/Input';
-import { PageHeader } from '../../../components/ui/PageHeader';
-import { StatCard } from '../../../components/ui/StatCard';
-import { PrintersTable } from '../components/PrintersTable';
+import { useAgents } from '../../agents/hooks/useAgents';
 import { usePrinters } from '../hooks/usePrinters';
+import type { Printer } from '../types';
+import { PrinterStatusBadge } from '../components/PrinterStatusBadge';
+
+type LooseAgent = {
+  id: string;
+  hostname?: string | null;
+  name?: string | null;
+  internal_ip?: string | null;
+  last_ip?: string | null;
+  ip?: string | null;
+  status?: string | null;
+  approval_status?: string | null;
+  revoked_at?: string | null;
+  agent_network?: string | null;
+  network?: string | null;
+  group_name?: string | null;
+  agent_group_name?: string | null;
+  domain_name?: string | null;
+  agent_domain_name?: string | null;
+  grouping_source?: string | null;
+  grouping_status?: string | null;
+};
+
+type InstallSelection = {
+  printer: Printer;
+  sourceNetwork: string;
+  sourceCompanyKey: string;
+} | null;
+
+function getPrinterName(printer: Printer) {
+  return printer.name || printer.printer_name || 'Impressora sem nome';
+}
+
+function getAgentName(agent?: LooseAgent | null) {
+  return agent?.hostname || agent?.name || agent?.id || 'Agente sem nome';
+}
+
+function getAgentIp(agent?: LooseAgent | null) {
+  return agent?.internal_ip || agent?.last_ip || agent?.ip || null;
+}
+
+function networkFromIp(ipValue?: string | null) {
+  if (!ipValue) return null;
+
+  const parts = String(ipValue).trim().split('.').map((item) => Number(item));
+
+  if (parts.length !== 4 || parts.some((part) => Number.isNaN(part) || part < 0 || part > 255)) {
+    return null;
+  }
+
+  return `${parts[0]}.${parts[1]}.${parts[2]}.0/24`;
+}
+
+function getAgentNetwork(agent?: LooseAgent | null) {
+  return agent?.agent_network || agent?.network || networkFromIp(getAgentIp(agent));
+}
+
+function getPrinterNetwork(printer: Printer, sourceAgent?: LooseAgent | null) {
+  return printer.agent_network || printer.network || getAgentNetwork(sourceAgent) || 'Rede não identificada';
+}
+
+function getAgentCompanyName(agent?: LooseAgent | null) {
+  return (
+    agent?.agent_group_name ||
+    agent?.group_name ||
+    agent?.agent_domain_name ||
+    agent?.domain_name ||
+    'Sem empresa/grupo'
+  );
+}
+
+function getPrinterCompanyName(printer: Printer, sourceAgent?: LooseAgent | null) {
+  return (
+    printer.agent_group_name ||
+    printer.company_group ||
+    printer.agent_domain_name ||
+    getAgentCompanyName(sourceAgent)
+  );
+}
+
+function getCompanyKey(name: string) {
+  return name.trim().toLowerCase();
+}
+
+function getPrinterCompanyKey(printer: Printer, sourceAgent?: LooseAgent | null) {
+  return getCompanyKey(getPrinterCompanyName(printer, sourceAgent));
+}
+
+function isVirtualPrinter(printer: Printer) {
+  const name = getPrinterName(printer).toLowerCase();
+  const driver = String(printer.driver_name || '').toLowerCase();
+  const port = String(printer.port_name || '').toLowerCase();
+
+  return (
+    name.includes('onenote') ||
+    name.includes('print to pdf') ||
+    name.includes('pdf') ||
+    driver.includes('onenote') ||
+    driver.includes('pdf') ||
+    port.includes('nul') ||
+    port.includes('portprompt')
+  );
+}
+
+function isAgentOnline(agent?: LooseAgent | null) {
+  return String(agent?.status || '').toLowerCase() === 'online';
+}
+
+function isAgentApproved(agent?: LooseAgent | null) {
+  const approval = String(agent?.approval_status || 'approved').toLowerCase();
+  return !agent?.revoked_at && !['revoked', 'blocked', 'rejected'].includes(approval);
+}
+
+function canPrepareInstall(printer: Printer) {
+  if (isVirtualPrinter(printer)) return false;
+  return Boolean(printer.share_name || printer.port_name || printer.is_network || printer.is_shared);
+}
+
+function isExpanded(map: Record<string, boolean>, key: string) {
+  return map[key] ?? true;
+}
 
 export function PrintersPage() {
   const [search, setSearch] = useState('');
+  const [installSelection, setInstallSelection] = useState<InstallSelection>(null);
+  const [expandedCompanies, setExpandedCompanies] = useState<Record<string, boolean>>({});
+  const [expandedNetworks, setExpandedNetworks] = useState<Record<string, boolean>>({});
 
   const { data, isLoading, isError, error, refetch, isFetching } = usePrinters();
+  const agentsQuery = useAgents();
 
   const printers = data?.items || [];
+  const agents = (agentsQuery.data?.items || []) as LooseAgent[];
+
+  const agentsById = useMemo(() => {
+    return new Map(agents.map((agent) => [agent.id, agent]));
+  }, [agents]);
 
   const filteredPrinters = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
 
-    if (!normalizedSearch) {
-      return printers;
-    }
+    if (!normalizedSearch) return printers;
 
     return printers.filter((printer) => {
-      const values = [
-        printer.name,
-        printer.printer_name,
+      const sourceAgent = agentsById.get(printer.agent_id || '');
+      const fields = [
+        getPrinterName(printer),
         printer.driver_name,
         printer.port_name,
         printer.share_name,
-        printer.agent_id,
         printer.agent_hostname,
+        sourceAgent?.hostname,
+        sourceAgent?.internal_ip,
+        getPrinterNetwork(printer, sourceAgent),
+        getPrinterCompanyName(printer, sourceAgent),
       ];
 
-      return values.some((value) =>
-        String(value || '').toLowerCase().includes(normalizedSearch)
-      );
+      return fields.some((field) => String(field || '').toLowerCase().includes(normalizedSearch));
     });
-  }, [printers, search]);
+  }, [agentsById, printers, search]);
 
-  const onlineCount = printers.filter((printer) => printer.is_online === true || printer.status === 'online').length;
+  const groupedByCompany = useMemo(() => {
+    const companyMap = new Map<
+      string,
+      {
+        key: string;
+        name: string;
+        printers: Printer[];
+        networks: Map<string, Printer[]>;
+      }
+    >();
+
+    for (const printer of filteredPrinters) {
+      const sourceAgent = agentsById.get(printer.agent_id || '');
+      const companyName = getPrinterCompanyName(printer, sourceAgent);
+      const companyKey = getCompanyKey(companyName);
+      const network = getPrinterNetwork(printer, sourceAgent);
+
+      if (!companyMap.has(companyKey)) {
+        companyMap.set(companyKey, {
+          key: companyKey,
+          name: companyName,
+          printers: [],
+          networks: new Map(),
+        });
+      }
+
+      const company = companyMap.get(companyKey)!;
+      company.printers.push(printer);
+
+      if (!company.networks.has(network)) {
+        company.networks.set(network, []);
+      }
+
+      company.networks.get(network)?.push(printer);
+    }
+
+    return Array.from(companyMap.values())
+      .map((company) => ({
+        ...company,
+        networks: Array.from(company.networks.entries())
+          .map(([network, items]) => ({
+            network,
+            key: `${company.key}:${network}`,
+            items,
+            agents: agents.filter((agent) => {
+              return getCompanyKey(getAgentCompanyName(agent)) === company.key && getAgentNetwork(agent) === network;
+            }),
+          }))
+          .sort((a, b) => a.network.localeCompare(b.network)),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [agents, agentsById, filteredPrinters]);
+
   const sharedCount = printers.filter((printer) => printer.is_shared).length;
   const defaultCount = printers.filter((printer) => printer.is_default).length;
+  const networkCount = groupedByCompany.reduce((total, company) => total + company.networks.length, 0);
+
+  const selectedPrinter = installSelection?.printer || null;
+  const selectedSourceAgent = selectedPrinter ? agentsById.get(selectedPrinter.agent_id || '') : null;
+
+  const targetAgents = useMemo(() => {
+    if (!installSelection) return [];
+
+    return agents.filter((agent) => {
+      const sameNetwork = getAgentNetwork(agent) === installSelection.sourceNetwork;
+      const sameCompany = getCompanyKey(getAgentCompanyName(agent)) === installSelection.sourceCompanyKey;
+      const notSource = agent.id !== installSelection.printer.agent_id;
+
+      return sameNetwork && sameCompany && notSource && isAgentOnline(agent) && isAgentApproved(agent);
+    });
+  }, [agents, installSelection]);
+
+  function toggleCompany(companyKey: string) {
+    setExpandedCompanies((current) => ({
+      ...current,
+      [companyKey]: !isExpanded(current, companyKey),
+    }));
+  }
+
+  function toggleNetwork(networkKey: string) {
+    setExpandedNetworks((current) => ({
+      ...current,
+      [networkKey]: !isExpanded(current, networkKey),
+    }));
+  }
 
   return (
-    <section>
-      <PageHeader
-        title="Impressoras"
-        description="Inventário geral de impressoras identificadas pelos agentes."
-        actions={
-          <button
-            onClick={() => refetch()}
-            className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
-          >
-            {isFetching ? 'Atualizando...' : 'Atualizar'}
-          </button>
-        }
-      />
+    <div>
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-950">Impressoras</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Impressoras sincronizadas por empresa/grupo/domínio e separadas por rede.
+          </p>
+        </div>
 
-      <div className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          title="Total de impressoras"
-          value={printers.length}
-          description="Detectadas no ambiente"
-          icon="🖨️"
-        />
-
-        <StatCard
-          title="Online"
-          value={onlineCount}
-          description="Disponíveis"
-          icon="✅"
-        />
-
-        <StatCard
-          title="Compartilhadas"
-          value={sharedCount}
-          description="Com share configurado"
-          icon="🌐"
-        />
-
-        <StatCard
-          title="Padrão"
-          value={defaultCount}
-          description="Definidas como padrão"
-          icon="⭐"
-        />
+        <button
+          onClick={() => refetch()}
+          className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+        >
+          {isFetching ? 'Atualizando...' : 'Atualizar'}
+        </button>
       </div>
 
-      {data?.warning && (
-        <Card className="mb-4 border-amber-200 bg-amber-50 p-4">
-          <Badge variant="warning">Aviso</Badge>
-          <p className="mt-2 text-sm text-amber-700">
-            O backend respondeu, mas ainda não encontrou uma tabela/modelo real de impressoras.
-            A tela já está preparada para quando o agente enviar esse inventário.
-          </p>
+      <div className="mb-6 grid gap-4 md:grid-cols-4">
+        <Card className="p-5">
+          <p className="text-sm font-medium text-slate-500">Total</p>
+          <p className="mt-2 text-3xl font-bold text-slate-950">{printers.length}</p>
+          <p className="mt-1 text-sm text-slate-500">Impressoras inventariadas</p>
         </Card>
-      )}
 
-      <Card className="mb-4 p-5">
-        <div className="max-w-md">
-          <Input
-            label="Pesquisar"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Nome, driver, porta ou agente"
-          />
-        </div>
+        <Card className="p-5">
+          <p className="text-sm font-medium text-slate-500">Redes</p>
+          <p className="mt-2 text-3xl font-bold text-slate-950">{networkCount}</p>
+          <p className="mt-1 text-sm text-slate-500">Agrupamentos por rede</p>
+        </Card>
+
+        <Card className="p-5">
+          <p className="text-sm font-medium text-slate-500">Compartilhadas</p>
+          <p className="mt-2 text-3xl font-bold text-slate-950">{sharedCount}</p>
+          <p className="mt-1 text-sm text-slate-500">Com compartilhamento</p>
+        </Card>
+
+        <Card className="p-5">
+          <p className="text-sm font-medium text-slate-500">Padrão</p>
+          <p className="mt-2 text-3xl font-bold text-slate-950">{defaultCount}</p>
+          <p className="mt-1 text-sm text-slate-500">Definidas como padrão</p>
+        </Card>
+      </div>
+
+      <Card className="mb-6 p-5">
+        <label className="text-sm font-semibold text-slate-700" htmlFor="printer-search">
+          Buscar impressora
+        </label>
+        <input
+          id="printer-search"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Nome, driver, porta, empresa, domínio, rede, IP ou agente"
+          className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+        />
       </Card>
 
       {isError && (
-        <Card className="mb-4 border-red-200 bg-red-50 p-4">
+        <Card className="mb-6 border-red-200 bg-red-50 p-4">
           <p className="text-sm font-semibold text-red-700">
             Não foi possível carregar as impressoras.
           </p>
@@ -123,21 +322,276 @@ export function PrintersPage() {
       {isLoading ? (
         <div className="space-y-3">
           {Array.from({ length: 5 }).map((_, index) => (
-            <Card key={index} className="h-16 animate-pulse bg-slate-100 p-4">
+            <Card key={index} className="h-24 animate-pulse bg-slate-100 p-4">
               <div />
             </Card>
           ))}
         </div>
+      ) : groupedByCompany.length === 0 ? (
+        <Card className="border-blue-200 bg-blue-50 p-5">
+          <Badge variant="info">Sem impressoras</Badge>
+          <p className="mt-2 text-sm text-blue-800">
+            Nenhuma impressora foi encontrada com os filtros atuais.
+          </p>
+        </Card>
       ) : (
-        <>
-          <div className="mb-3 text-sm text-slate-500">
-            Exibindo <strong>{filteredPrinters.length}</strong> de{' '}
-            <strong>{printers.length}</strong> impressoras.
-          </div>
+        <div className="space-y-6">
+          <p className="text-sm text-slate-500">
+            Exibindo <strong>{filteredPrinters.length}</strong> de <strong>{printers.length}</strong> impressoras em <strong>{groupedByCompany.length}</strong> grupo(s).
+          </p>
 
-          <PrintersTable printers={filteredPrinters} />
-        </>
+          {groupedByCompany.map((company) => {
+            const companyExpanded = isExpanded(expandedCompanies, company.key);
+            const companyAgents = agents.filter((agent) => getCompanyKey(getAgentCompanyName(agent)) === company.key);
+
+            return (
+              <Card key={company.key} className="overflow-hidden p-0">
+                <div className="border-b border-slate-200 bg-white p-5">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <h2 className="text-xl font-bold text-slate-950">
+                        {company.name}
+                      </h2>
+                      <p className="mt-1 text-sm text-slate-500">
+                        {companyAgents.length} agente(s) · {company.networks.length} rede(s) · {company.printers.length} impressora(s)
+                      </p>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <span className="rounded-full bg-white px-3 py-1 text-sm font-semibold text-slate-700 ring-1 ring-slate-200">
+                        Online: {companyAgents.filter(isAgentOnline).length}
+                      </span>
+                      <button
+                        onClick={() => toggleCompany(company.key)}
+                        className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-blue-700 shadow-sm hover:bg-slate-50"
+                      >
+                        {companyExpanded ? 'Recolher grupo' : 'Expandir grupo'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {companyExpanded && (
+                  <div className="space-y-4 bg-slate-50 p-5">
+                    {company.networks.map((group) => {
+                      const networkExpanded = isExpanded(expandedNetworks, group.key);
+
+                      return (
+                        <Card key={group.key} className="overflow-hidden p-0">
+                          <div className="border-b border-slate-200 bg-slate-50 p-5">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                              <div>
+                                <h3 className="text-lg font-bold text-slate-950">
+                                  Rede {group.network}
+                                </h3>
+                                <p className="mt-1 text-sm text-slate-500">
+                                  {group.agents.length} agente(s) nesta rede · {group.items.length} impressora(s)
+                                </p>
+                              </div>
+
+                              <div className="flex flex-wrap gap-2">
+                                <span className="rounded-full bg-white px-3 py-1 text-sm font-semibold text-slate-700 ring-1 ring-slate-200">
+                                  Online: {group.agents.filter(isAgentOnline).length}
+                                </span>
+                                <span className="rounded-full bg-white px-3 py-1 text-sm font-semibold text-slate-700 ring-1 ring-slate-200">
+                                  Instaláveis: {group.items.filter(canPrepareInstall).length}
+                                </span>
+                                <button
+                                  onClick={() => toggleNetwork(group.key)}
+                                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-blue-700 shadow-sm hover:bg-slate-50"
+                                >
+                                  {networkExpanded ? 'Recolher rede' : 'Expandir rede'}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          {networkExpanded && (
+                            <div className="divide-y divide-slate-200 bg-white">
+                              {group.items.map((printer) => {
+                                const sourceAgent = agentsById.get(printer.agent_id || '');
+                                const sourceNetwork = getPrinterNetwork(printer, sourceAgent);
+                                const sourceCompanyKey = getPrinterCompanyKey(printer, sourceAgent);
+                                const installable = canPrepareInstall(printer);
+
+                                return (
+                                  <div key={printer.id} className="p-5">
+                                    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                                      <div className="min-w-0">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <h4 className="text-base font-bold text-slate-950">
+                                            {getPrinterName(printer)}
+                                          </h4>
+
+                                          <PrinterStatusBadge printer={printer} />
+
+                                          {printer.is_default && <Badge variant="info">Padrão</Badge>}
+                                          {printer.is_shared && <Badge variant="success">Compartilhada</Badge>}
+                                          {printer.is_network && <Badge variant="info">Rede</Badge>}
+                                          {isVirtualPrinter(printer) && <Badge variant="warning">Virtual</Badge>}
+                                        </div>
+
+                                        <div className="mt-3 grid gap-2 text-sm text-slate-600 md:grid-cols-2 xl:grid-cols-4">
+                                          <div>
+                                            <span className="font-semibold text-slate-700">Agente:</span>{' '}
+                                            {printer.agent_hostname || getAgentName(sourceAgent)}
+                                          </div>
+                                          <div>
+                                            <span className="font-semibold text-slate-700">IP agente:</span>{' '}
+                                            {printer.agent_ip || getAgentIp(sourceAgent) || '—'}
+                                          </div>
+                                          <div>
+                                            <span className="font-semibold text-slate-700">Driver:</span>{' '}
+                                            {printer.driver_name || '—'}
+                                          </div>
+                                          <div>
+                                            <span className="font-semibold text-slate-700">Porta:</span>{' '}
+                                            {printer.port_name || '—'}
+                                          </div>
+                                        </div>
+
+                                        {printer.share_name && (
+                                          <p className="mt-2 text-sm text-slate-600">
+                                            <span className="font-semibold text-slate-700">Compartilhamento:</span>{' '}
+                                            {printer.share_name}
+                                          </p>
+                                        )}
+
+                                        {!installable && (
+                                          <p className="mt-3 text-xs text-amber-700">
+                                            Esta impressora não está disponível para instalação remota nesta etapa. Impressoras virtuais ou sem porta/compartilhamento não serão replicadas.
+                                          </p>
+                                        )}
+                                      </div>
+
+                                      <div className="flex shrink-0 flex-wrap gap-2">
+                                        <button
+                                          disabled={!installable}
+                                          onClick={() => setInstallSelection({ printer, sourceNetwork, sourceCompanyKey })}
+                                          className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
+                                        >
+                                          Instalar em um computador
+                                        </button>
+
+                                        {printer.agent_id && (
+                                          <a
+                                            href={`/agents/${printer.agent_id}`}
+                                            className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                                          >
+                                            Ver agente
+                                          </a>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </Card>
+                      );
+                    })}
+                  </div>
+                )}
+              </Card>
+            );
+          })}
+        </div>
       )}
-    </section>
+
+      {installSelection && selectedPrinter && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
+          <Card className="max-h-[90vh] w-full max-w-3xl overflow-y-auto p-6">
+            <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-slate-950">
+                  Instalar em um computador
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Serão exibidos apenas computadores online, aprovados, da mesma empresa/grupo e da mesma rede.
+                </p>
+              </div>
+
+              <button
+                onClick={() => setInstallSelection(null)}
+                className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Fechar
+              </button>
+            </div>
+
+            <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <p className="text-sm font-semibold text-slate-500">Impressora de origem</p>
+              <p className="mt-1 text-lg font-bold text-slate-950">
+                {getPrinterName(selectedPrinter)}
+              </p>
+              <div className="mt-2 grid gap-2 text-sm text-slate-600 md:grid-cols-2">
+                <p>
+                  <span className="font-semibold text-slate-700">Empresa/grupo:</span>{' '}
+                  {getPrinterCompanyName(selectedPrinter, selectedSourceAgent)}
+                </p>
+                <p>
+                  <span className="font-semibold text-slate-700">Rede:</span>{' '}
+                  {installSelection.sourceNetwork}
+                </p>
+                <p>
+                  <span className="font-semibold text-slate-700">Origem:</span>{' '}
+                  {selectedPrinter.agent_hostname || getAgentName(selectedSourceAgent)}
+                </p>
+                <p>
+                  <span className="font-semibold text-slate-700">Driver:</span>{' '}
+                  {selectedPrinter.driver_name || 'Driver não identificado'}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5">
+              <h3 className="text-sm font-bold uppercase tracking-wide text-slate-500">
+                Computadores disponíveis
+              </h3>
+
+              {targetAgents.length === 0 ? (
+                <Card className="mt-3 border-amber-200 bg-amber-50 p-4">
+                  <Badge variant="warning">Nenhum destino disponível</Badge>
+                  <p className="mt-2 text-sm text-amber-700">
+                    Não há outro agente online, aprovado, na mesma empresa/grupo e na mesma rede para receber esta impressora.
+                  </p>
+                </Card>
+              ) : (
+                <div className="mt-3 space-y-3">
+                  {targetAgents.map((agent) => (
+                    <div
+                      key={agent.id}
+                      className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div>
+                        <p className="font-semibold text-slate-950">
+                          {getAgentName(agent)}
+                        </p>
+                        <p className="mt-1 text-sm text-slate-500">
+                          IP: {getAgentIp(agent) || '—'} · Rede: {getAgentNetwork(agent) || '—'} · Grupo: {getAgentCompanyName(agent)}
+                        </p>
+                      </div>
+
+                      <button
+                        disabled
+                        className="rounded-lg bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-500"
+                        title="O comando install_network_printer será criado na próxima etapa."
+                      >
+                        Instalar
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <p className="mt-4 text-xs text-slate-500">
+                Nesta etapa o sistema valida os computadores permitidos. O comando real de instalação será ativado após criarmos o handler install_network_printer no agente Windows.
+              </p>
+            </div>
+          </Card>
+        </div>
+      )}
+    </div>
   );
 }
