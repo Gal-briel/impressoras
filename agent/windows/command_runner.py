@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from printer_inventory import collect_printers
+from network_printer_discovery import discover_network_printers
 
 
 @dataclass
@@ -1955,6 +1956,77 @@ def execute_command(command_type: str, payload: dict[str, Any]) -> CommandResult
     if command_type == "update_agent":
         return update_agent(payload or {})
     try:
+
+        if command_type == "list_printers":
+
+            ps_script = r"""
+$printers = Get-Printer | Select-Object Name, DriverName, PortName, ShareName, Published, Shared, PrinterStatus, WorkOffline
+$printers | ConvertTo-Json -Depth 4
+"""
+
+            proc = subprocess.run(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    ps_script,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+
+            if proc.returncode != 0:
+                output = proc.stderr.strip() or proc.stdout.strip() or "Falha ao listar impressoras."
+                return CommandResult(success=False, output=output)
+
+            raw = proc.stdout.strip()
+            data = json.loads(raw) if raw else []
+
+            if isinstance(data, dict):
+                data = [data]
+
+            printers = []
+            for item in data:
+                printers.append(
+                    {
+                        "name": item.get("Name"),
+                        "driver_name": item.get("DriverName"),
+                        "port_name": item.get("PortName"),
+                        "share_name": item.get("ShareName"),
+                        "published": item.get("Published"),
+                        "shared": item.get("Shared"),
+                        "status": item.get("PrinterStatus"),
+                        "work_offline": item.get("WorkOffline"),
+                    }
+                )
+
+            result = {
+                "status": "success",
+                "total": len(printers),
+                "items": printers,
+            }
+
+            return CommandResult(
+                success=True,
+                output="Impressoras locais encontradas: "
+                + str(len(printers))
+                + "\n\n"
+                + json.dumps(result, ensure_ascii=False, indent=2),
+            )
+
+        if command_type == "discover_network_printers":
+            discovery = discover_network_printers(payload or {})
+            total = discovery.get("total", 0)
+            output = json.dumps(_clean_json_value(discovery), ensure_ascii=False, indent=2)
+
+            return CommandResult(
+                success=True,
+                output=f"Descoberta de impressoras concluída. Encontradas: {total}\n\n{output}",
+            )
+
         if command_type == "collect_inventory":
             printers = collect_printers()
             return CommandResult(
@@ -1999,6 +2071,289 @@ Write-Output "Fila de impressão limpa."
             service_name = str(payload.get("service_name") or "Spooler").replace('"', '\\"')
             output = run_powershell(f'Restart-Service -Name "{service_name}" -Force; Write-Output "Serviço reiniciado: {service_name}"')
             return CommandResult(success=True, output=output)
+
+        if command_type == "install_network_printer":
+            import json
+            import os
+            import subprocess
+            import tempfile
+            from pathlib import Path
+
+            payload = payload or {}
+
+            ps_payload = {
+                "printer_name": payload.get("printer_name") or payload.get("name") or payload.get("ip") or "Impressora de rede",
+                "install_method": str(payload.get("install_method") or "").lower(),
+                "share_path": payload.get("share_path"),
+                "ip": payload.get("ip"),
+                "driver_name": payload.get("driver_name"),
+                "protocol": str(payload.get("protocol") or "").lower(),
+                "port": payload.get("port") or payload.get("port_number"),
+                "port_name": payload.get("port_name"),
+                "queue_name": payload.get("queue_name") or payload.get("lpr_queue_name"),
+            }
+
+            ps_script = r'''
+        $ErrorActionPreference = "Stop"
+
+        function Write-Result($obj) {
+            $obj | ConvertTo-Json -Depth 8 -Compress
+        }
+
+        function Get-DriverList {
+            try {
+                return @(Get-PrinterDriver | Select-Object -ExpandProperty Name | Sort-Object)
+            } catch {
+                return @()
+            }
+        }
+
+        try {
+            $payloadPath = $env:GABRIEL_INSTALL_PRINTER_PAYLOAD
+            $payload = Get-Content $payloadPath -Raw | ConvertFrom-Json
+
+            $printerName = [string]$payload.printer_name
+            $installMethod = [string]$payload.install_method
+            $sharePath = [string]$payload.share_path
+            $ip = [string]$payload.ip
+            $driverName = [string]$payload.driver_name
+            $protocol = [string]$payload.protocol
+            $portValue = $payload.port
+            $portName = [string]$payload.port_name
+            $queueName = [string]$payload.queue_name
+
+            if ([string]::IsNullOrWhiteSpace($printerName)) {
+                $printerName = "Impressora de rede"
+            }
+
+            if (-not [string]::IsNullOrWhiteSpace($sharePath)) {
+                $installMethod = "smb_share"
+            }
+
+            if ([string]::IsNullOrWhiteSpace($installMethod)) {
+                $installMethod = "tcp_ip"
+            }
+
+            if ($installMethod -eq "smb_share") {
+                if ([string]::IsNullOrWhiteSpace($sharePath) -or -not $sharePath.StartsWith("\\")) {
+                    Write-Result @{
+                        status = "invalid_payload"
+                        message = "Caminho de compartilhamento inválido. Informe algo como \\SERVIDOR\IMPRESSORA."
+                        printer_name = $printerName
+                        share_path = $sharePath
+                    }
+                    exit 2
+                }
+
+                $existing = Get-Printer -ErrorAction SilentlyContinue | Where-Object {
+                    $_.Name -eq $sharePath -or $_.Name -eq $printerName
+                }
+
+                if ($existing) {
+                    Write-Result @{
+                        status = "already_installed"
+                        message = "Impressora compartilhada já está instalada."
+                        printer_name = $existing.Name
+                        share_path = $sharePath
+                    }
+                    exit 0
+                }
+
+                Add-Printer -ConnectionName $sharePath
+
+                Write-Result @{
+                    status = "installed"
+                    install_method = "smb_share"
+                    printer_name = $printerName
+                    share_path = $sharePath
+                }
+                exit 0
+            }
+
+            if ([string]::IsNullOrWhiteSpace($ip)) {
+                Write-Result @{
+                    status = "invalid_payload"
+                    message = "IP da impressora não informado."
+                    printer_name = $printerName
+                }
+                exit 2
+            }
+
+            if ([string]::IsNullOrWhiteSpace($driverName)) {
+                Write-Result @{
+                    status = "needs_driver"
+                    message = "Driver não informado. Escolha um driver instalado no Windows de destino antes de instalar."
+                    printer_name = $printerName
+                    ip = $ip
+                    protocol = $protocol
+                    port = $portValue
+                    available_drivers = Get-DriverList
+                }
+                exit 3
+            }
+
+            $driverExists = Get-PrinterDriver -Name $driverName -ErrorAction SilentlyContinue
+
+            if (-not $driverExists) {
+                Write-Result @{
+                    status = "driver_not_found"
+                    message = "Driver informado não está instalado no Windows de destino."
+                    printer_name = $printerName
+                    requested_driver = $driverName
+                    available_drivers = Get-DriverList
+                }
+                exit 4
+            }
+
+            $isLpr = $false
+
+            if ($protocol -eq "lpr_515" -or "$portValue" -eq "515") {
+                $isLpr = $true
+            }
+
+            if ($isLpr -and [string]::IsNullOrWhiteSpace($queueName)) {
+                Write-Result @{
+                    status = "needs_lpr_queue"
+                    message = "A impressora usa LPR/515, mas a fila LPR não foi informada. Informe queue_name antes de instalar."
+                    printer_name = $printerName
+                    ip = $ip
+                    protocol = "lpr_515"
+                    port = 515
+                    driver_name = $driverName
+                }
+                exit 5
+            }
+
+            if ([string]::IsNullOrWhiteSpace($portName)) {
+                $safeIp = $ip.Replace(".", "_")
+
+                if ($isLpr) {
+                    $safeQueue = $queueName.Replace('\', '_').Replace('/', '_').Replace(' ', '_')
+                    $portName = "LPR_${safeIp}_${safeQueue}"
+                } else {
+                    $portName = "IP_$safeIp"
+                }
+            }
+
+            $existingPrinter = Get-Printer -Name $printerName -ErrorAction SilentlyContinue
+
+            if ($existingPrinter) {
+                Write-Result @{
+                    status = "already_installed"
+                    message = "Já existe uma impressora com esse nome."
+                    printer_name = $printerName
+                    port_name = $existingPrinter.PortName
+                    driver_name = $existingPrinter.DriverName
+                }
+                exit 0
+            }
+
+            $existingPort = Get-PrinterPort -Name $portName -ErrorAction SilentlyContinue
+
+            if (-not $existingPort) {
+                if ($isLpr) {
+                    Add-PrinterPort -Name $portName -LprHostAddress $ip -LprQueueName $queueName -LprByteCounting
+                } else {
+                    $tcpPort = 9100
+
+                    if ($portValue) {
+                        try {
+                            $tcpPort = [int]$portValue
+                        } catch {
+                            $tcpPort = 9100
+                        }
+                    }
+
+                    Add-PrinterPort -Name $portName -PrinterHostAddress $ip -PortNumber $tcpPort
+                }
+            }
+
+            Add-Printer -Name $printerName -DriverName $driverName -PortName $portName
+
+            Write-Result @{
+                status = "installed"
+                install_method = $(if ($isLpr) { "lpr" } else { "tcp_ip" })
+                printer_name = $printerName
+                ip = $ip
+                port_name = $portName
+                driver_name = $driverName
+                protocol = $(if ($isLpr) { "lpr_515" } else { "tcp_9100" })
+                port = $(if ($isLpr) { 515 } else { $tcpPort })
+                queue_name = $queueName
+            }
+            exit 0
+        } catch {
+            Write-Result @{
+                status = "powershell_error"
+                message = $_.Exception.Message
+                category = $_.CategoryInfo.Category
+                target = $_.CategoryInfo.TargetName
+            }
+            exit 10
+        }
+        '''
+
+            with tempfile.NamedTemporaryFile("w", delete=False, suffix=".json", encoding="utf-8") as temp_payload:
+                json.dump(ps_payload, temp_payload, ensure_ascii=False)
+                temp_payload_path = temp_payload.name
+
+            try:
+                env = dict(os.environ)
+                env["GABRIEL_INSTALL_PRINTER_PAYLOAD"] = temp_payload_path
+
+                proc = subprocess.run(
+                    [
+                        "powershell.exe",
+                        "-NoProfile",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-Command",
+                        ps_script,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=int(payload.get("timeout_seconds") or 180),
+                    env=env,
+                )
+            finally:
+                try:
+                    Path(temp_payload_path).unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+            raw_output = (proc.stdout or "").strip()
+            raw_error = (proc.stderr or "").strip()
+
+            if raw_output:
+                try:
+                    result = json.loads(raw_output.splitlines()[-1])
+                except Exception:
+                    result = {
+                        "status": "unknown_output",
+                        "raw_output": raw_output,
+                        "raw_error": raw_error,
+                    }
+            else:
+                result = {
+                    "status": "powershell_error",
+                    "message": raw_error or "PowerShell não retornou saída.",
+                }
+
+            status_value = str(result.get("status") or "").lower()
+
+            output = (
+                "Resultado da instalação de impressora de rede:\n\n"
+                + json.dumps(result, ensure_ascii=False, indent=2)
+            )
+
+            if proc.returncode == 0 and status_value in {"installed", "already_installed"}:
+                return CommandResult(success=True, output=output)
+
+            return CommandResult(
+                success=False,
+                output=output,
+                error_code=status_value or "install_network_printer_failed",
+            )
 
         return CommandResult(
             success=False,

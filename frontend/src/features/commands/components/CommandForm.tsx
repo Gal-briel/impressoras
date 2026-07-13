@@ -24,14 +24,19 @@ const commandOptions: Array<{ value: CommandType; label: string; description: st
     description: 'Remove trabalhos presos na fila.',
   },
   {
+    value: 'discover_network_printers',
+    label: 'Buscar impressoras na rede',
+    description: 'Procura impressoras compartilhadas e dispositivos de impressão na rede local do agente.',
+  },
+  {
     value: 'collect_inventory',
     label: 'Coletar inventário',
     description: 'Solicita inventário atualizado do agente.',
   },
   {
-    value: 'install_printer',
-    label: 'Instalar impressora',
-    description: 'Preparado para instalação remota de impressora.',
+    value: 'install_network_printer',
+    label: 'Instalar impressora de rede',
+    description: 'Instala uma impressora de rede em um computador da mesma rede/grupo.',
   },
   {
     value: 'restart_service',
@@ -90,7 +95,7 @@ export function CommandForm({
     }
 
     if (
-      ['install_printer', 'set_default_printer', 'remove_printer', 'print_test_page'].includes(commandType)
+      ['install_network_printer', 'set_default_printer', 'remove_printer', 'print_test_page'].includes(commandType)
       && printerName
     ) {
       payload.printer_name = printerName;
@@ -99,7 +104,17 @@ export function CommandForm({
     await onSubmit({
       agent_id: agentId.trim(),
       command_type: commandType,
-      payload,
+      payload: commandType === 'install_network_printer'
+        ? {
+            printer_name: printerName || 'Teste Gabriel - STORAGE-FENXIA',
+            install_method: 'tcp_ip',
+            ip: '10.34.10.230',
+            protocol: 'lpr_515',
+            port: 515,
+            driver_name: null,
+            timeout_seconds: 180,
+          }
+        : payload,
     });
 
     setPrinterName('');
@@ -108,7 +123,7 @@ export function CommandForm({
   const selectedCommand = commandOptions.find((option) => option.value === commandType);
 
   const shouldShowPrinterName = [
-    'install_printer',
+    'install_network_printer',
     'set_default_printer',
     'remove_printer',
     'print_test_page',
