@@ -8,7 +8,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
-from app.core.dependencies import CurrentUser, get_current_user
+from app.core.dependencies import CurrentUser, require_permissions
 from app.infrastructure.database.models import Agent, Command
 
 
@@ -612,7 +612,7 @@ async def _upsert_inventory(
 @router.get("/agents/{agent_id}/inventory")
 async def get_agent_inventory(
     agent_id: UUID,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["inventory:read"])),
     session: AsyncSession = Depends(get_db_session),
 ):
     tenant_id = UUID(str(current_user.tenant_id))
@@ -630,7 +630,7 @@ async def get_agent_inventory(
 @router.post("/agents/{agent_id}/inventory/from-latest-diagnostics")
 async def create_inventory_from_latest_diagnostics(
     agent_id: UUID,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["inventory:read"])),
     session: AsyncSession = Depends(get_db_session),
 ):
     tenant_id = UUID(str(current_user.tenant_id))
@@ -675,7 +675,7 @@ async def create_inventory_from_latest_diagnostics(
 
 @router.get("/inventory/devices")
 async def list_inventory_devices(
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["inventory:read"])),
     session: AsyncSession = Depends(get_db_session),
 ):
     tenant_id = UUID(str(current_user.tenant_id))

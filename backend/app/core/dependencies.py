@@ -107,8 +107,11 @@ async def require_agent_auth(
       Authorization: ApiKey <chave>
       x-agent-id: <uuid-do-agente>
 
-    Em desenvolvimento, aceita a chave estática AGENT_API_KEY/dev-agent-api-key.
-    Quando o agente existe e tem api_key_hash, também valida o hash gravado no banco.
+    Regra de produção:
+      - o agent_id precisa existir;
+      - o agente precisa estar aprovado;
+      - o agente não pode estar revogado;
+      - a API key enviada precisa bater com o api_key_hash do agente.
     """
 
     if not x_agent_id:
@@ -128,25 +131,23 @@ async def require_agent_auth(
     if scheme.lower() != "apikey" or not plain_api_key:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid agent authorization scheme")
 
-    dev_key = getattr(settings, "AGENT_API_KEY", None) or "dev-agent-api-key"
     agent = await agent_service.repository.get(agent_uuid)
 
-    if agent:
-        if agent.revoked_at is not None or agent.enrollment_status == EnrollmentStatus.REVOKED:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Agent revoked")
+    if not agent:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Agent not found or revoked")
 
-        if agent.api_key_hash:
-            if verify_api_key(plain_api_key, agent.api_key_hash) or plain_api_key == agent.api_key_hash:
-                return str(agent_uuid)
+    enrollment_status = str(getattr(agent.enrollment_status, "value", agent.enrollment_status)).lower()
 
-        # Compatibilidade dev para agentes antigos sem hash ou seed local.
-        if plain_api_key == dev_key:
-            return str(agent_uuid)
+    if agent.revoked_at is not None or enrollment_status == "revoked":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Agent revoked")
 
+    if enrollment_status != "approved":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Agent not approved")
+
+    if not agent.api_key_hash:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Agent API key not configured")
+
+    if not verify_api_key(plain_api_key, agent.api_key_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API Key")
 
-    # Deixa a rota decidir se retorna 404 Agent not found. Isso mantém o diagnóstico claro.
-    if plain_api_key == dev_key:
-        return str(agent_uuid)
-
-    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Agent not found or revoked")
+    return str(agent_uuid)

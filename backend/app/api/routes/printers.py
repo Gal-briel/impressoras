@@ -8,9 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
-from app.core.dependencies import CurrentUser, get_current_user, require_agent_auth
+from app.core.dependencies import CurrentUser, require_permissions, require_agent_auth
 from app.infrastructure.database.models import Agent, Printer, AgentGroup
-from app.core.dependencies import require_agent_auth
 
 router = APIRouter(tags=["printers"])
 
@@ -199,7 +198,7 @@ async def _get_agent_or_404(
 @router.get("/printers")
 async def list_printers(
     limit: int = Query(default=100, ge=1, le=500),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["printers:read"])),
     session: AsyncSession = Depends(get_db_session),
 ):
     tenant_id = _as_uuid(current_user.tenant_id)
@@ -238,7 +237,7 @@ async def list_printers(
 @router.get("/printers/{printer_id}")
 async def get_printer(
     printer_id: UUID,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["printers:read"])),
     session: AsyncSession = Depends(get_db_session),
 ):
     tenant_id = _as_uuid(current_user.tenant_id)
@@ -270,7 +269,7 @@ async def get_printer(
 async def list_agent_printers(
     agent_id: UUID,
     limit: int = Query(default=100, ge=1, le=500),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["printers:read"])),
     session: AsyncSession = Depends(get_db_session),
 ):
     tenant_id = _as_uuid(current_user.tenant_id)
@@ -315,7 +314,7 @@ async def list_agent_printers(
 async def upsert_agent_printer_inventory(
     agent_id: UUID,
     body: dict = Body(...),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["printers:write"])),
     session: AsyncSession = Depends(get_db_session),
 ):
     tenant_id = _as_uuid(current_user.tenant_id)
