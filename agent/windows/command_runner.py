@@ -1149,132 +1149,221 @@ PROTECTED_SERVICE_NAMES = {
 
 
 def kill_process(payload: dict[str, Any] | None = None) -> CommandResult:
+    """Encerra processos com escopo controlado.
+
+    payload:
+      - process_id / pid: PID alvo
+      - process_name: nome do processo, ex: chrome.exe
+      - scope:
+          single       -> encerra apenas o PID
+          tree         -> encerra PID e filhos
+          all_by_name  -> encerra todos pelo nome
+          browser_root -> encerra o aplicativo/navegador inteiro pelo nome
+    """
+    import json
+    import subprocess
+
     payload = payload or {}
 
-    confirm = str(payload.get("confirm") or "").strip().upper()
+    raw_pid = payload.get("process_id") or payload.get("pid")
+    process_name = str(payload.get("process_name") or "").strip()
+    scope = str(payload.get("scope") or "single").strip().lower()
 
-    if confirm != "KILL":
+    allowed_scopes = {"single", "tree", "all_by_name", "browser_root"}
+
+    if scope not in allowed_scopes:
         return CommandResult(
             success=False,
-            output={
-                "message": "Comando recusado. Envie payload.confirm = KILL para confirmar encerramento do processo.",
-            },
-            error_code="KILL_PROCESS_CONFIRMATION_REQUIRED",
+            output=json.dumps(
+                {
+                    "message": "Escopo inválido.",
+                    "scope": scope,
+                    "allowed_scopes": sorted(allowed_scopes),
+                },
+                ensure_ascii=False,
+            ),
+            error_code="INVALID_KILL_SCOPE",
         )
 
-    pid = payload.get("pid")
-    process_name = str(payload.get("process_name") or "").strip()
+    pid = None
+    if raw_pid not in (None, ""):
+        try:
+            pid = int(raw_pid)
+        except (TypeError, ValueError):
+            return CommandResult(
+                success=False,
+                output=json.dumps(
+                    {"message": "PID inválido.", "pid": raw_pid},
+                    ensure_ascii=False,
+                ),
+                error_code="INVALID_PROCESS_ID",
+            )
+
+    if pid is not None and pid <= 0:
+        return CommandResult(
+            success=False,
+            output=json.dumps(
+                {"message": "PID inválido.", "pid": pid},
+                ensure_ascii=False,
+            ),
+            error_code="INVALID_PROCESS_ID",
+        )
 
     if not pid and not process_name:
         return CommandResult(
             success=False,
-            output={
-                "message": "Informe pid ou process_name.",
-            },
-            error_code="KILL_PROCESS_TARGET_REQUIRED",
+            output=json.dumps(
+                {"message": "Informe process_id/pid ou process_name."},
+                ensure_ascii=False,
+            ),
+            error_code="PROCESS_TARGET_REQUIRED",
         )
 
-    target_name = process_name.lower()
+    # Proteção extra local: não usa shell=True, mas ainda valida nome.
+    if process_name:
+        dangerous_chars = set('`"\\\';;&|<>$')
+        if any(ch in dangerous_chars for ch in process_name) or any(ord(ch) < 32 for ch in process_name):
+            return CommandResult(
+                success=False,
+                output=json.dumps(
+                    {"message": "Nome de processo inseguro.", "process_name": process_name},
+                    ensure_ascii=False,
+                ),
+                error_code="UNSAFE_PROCESS_NAME",
+            )
 
-    if target_name in PROTECTED_PROCESS_NAMES:
-        return CommandResult(
-            success=False,
-            output={
-                "message": "Processo protegido. Encerramento bloqueado por segurança.",
-                "process_name": process_name,
-            },
-            error_code="PROTECTED_PROCESS",
+    def run_taskkill(args: list[str]) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["taskkill", *args],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            shell=False,
         )
 
-    try:
-        import psutil
+    def normalize_output(proc: subprocess.CompletedProcess) -> str:
+        output = "\n".join(
+            item for item in [proc.stdout.strip(), proc.stderr.strip()] if item
+        ).strip()
+        return output or f"taskkill exit code {proc.returncode}"
 
-        killed: list[dict[str, Any]] = []
+    def looks_not_found(output: str) -> bool:
+        lower = output.lower()
+        return (
+            "not found" in lower
+            or "não encontrado" in lower
+            or "nao encontrado" in lower
+            or "no running instance" in lower
+            or "nenhuma instância" in lower
+            or "nenhuma instancia" in lower
+        )
 
-        if pid:
-            try:
-                process = psutil.Process(int(pid))
-            except psutil.NoSuchProcess:
-                return CommandResult(
-                    success=False,
-                    output={
-                        "message": "Processo não encontrado. A lista pode estar desatualizada. Colete processos novamente.",
-                        "pid": pid,
+    if scope == "single":
+        if not pid:
+            return CommandResult(
+                success=False,
+                output=json.dumps(
+                    {
+                        "message": "Para scope=single informe process_id/pid.",
                         "process_name": process_name or None,
                     },
-                    error_code="PROCESS_NOT_FOUND",
-                )
+                    ensure_ascii=False,
+                ),
+                error_code="PROCESS_ID_REQUIRED",
+            )
 
-            actual_name = process.name()
-            actual_name_lower = str(actual_name or "").lower()
+        proc = run_taskkill(["/PID", str(pid), "/F"])
+        output = normalize_output(proc)
 
-            if actual_name_lower in PROTECTED_PROCESS_NAMES:
-                return CommandResult(
-                    success=False,
-                    output={
-                        "message": "Processo protegido. Encerramento bloqueado por segurança.",
-                        "pid": process.pid,
-                        "process_name": actual_name,
+    elif scope == "tree":
+        if not pid:
+            return CommandResult(
+                success=False,
+                output=json.dumps(
+                    {
+                        "message": "Para scope=tree informe process_id/pid.",
+                        "process_name": process_name or None,
                     },
-                    error_code="PROTECTED_PROCESS",
-                )
+                    ensure_ascii=False,
+                ),
+                error_code="PROCESS_ID_REQUIRED",
+            )
 
-            killed.append({
-                "pid": process.pid,
-                "name": actual_name,
-            })
+        proc = run_taskkill(["/PID", str(pid), "/T", "/F"])
+        output = normalize_output(proc)
 
-            process.terminate()
+    elif scope in {"all_by_name", "browser_root"}:
+        if not process_name:
+            return CommandResult(
+                success=False,
+                output=json.dumps(
+                    {
+                        "message": f"Para scope={scope} informe process_name.",
+                        "pid": pid,
+                    },
+                    ensure_ascii=False,
+                ),
+                error_code="PROCESS_NAME_REQUIRED",
+            )
 
-            try:
-                process.wait(timeout=10)
-            except psutil.TimeoutExpired:
-                process.kill()
+        # Para navegadores, isso fecha todas as abas/janelas e subprocessos.
+        proc = run_taskkill(["/IM", process_name, "/T", "/F"])
+        output = normalize_output(proc)
 
-        else:
-            for process in psutil.process_iter(["pid", "name"]):
-                try:
-                    current_name = str(process.info.get("name") or "")
-                    current_name_lower = current_name.lower()
-
-                    if current_name_lower != target_name:
-                        continue
-
-                    if current_name_lower in PROTECTED_PROCESS_NAMES:
-                        continue
-
-                    killed.append({
-                        "pid": process.pid,
-                        "name": current_name,
-                    })
-
-                    process.terminate()
-                except Exception:
-                    continue
-
-        return CommandResult(
-            success=True,
-            output=_clean_json_value({
-                "message": "Solicitação de encerramento de processo executada.",
-                "target": {
-                    "pid": pid,
-                    "process_name": process_name or None,
-                },
-                "killed": killed,
-                "count": len(killed),
-            }),
-        )
-
-    except Exception as exc:
+    else:
         return CommandResult(
             success=False,
-            output={
-                "message": "Falha ao encerrar processo.",
-                "error": str(exc),
-            },
-            error_code="KILL_PROCESS_FAILED",
+            output=json.dumps({"message": "Escopo inválido."}, ensure_ascii=False),
+            error_code="INVALID_KILL_SCOPE",
         )
 
+    if proc.returncode == 0:
+        return CommandResult(
+            success=True,
+            output=json.dumps(
+                {
+                    "message": "Processo encerrado com sucesso.",
+                    "scope": scope,
+                    "pid": pid,
+                    "process_name": process_name or None,
+                    "taskkill_output": output,
+                },
+                ensure_ascii=False,
+            ),
+            error_code=None,
+        )
+
+    if looks_not_found(output):
+        return CommandResult(
+            success=False,
+            output=json.dumps(
+                {
+                    "message": "Processo não encontrado. A lista pode estar desatualizada. Colete processos novamente.",
+                    "scope": scope,
+                    "pid": pid,
+                    "process_name": process_name or None,
+                    "taskkill_output": output,
+                },
+                ensure_ascii=False,
+            ),
+            error_code="PROCESS_NOT_FOUND",
+        )
+
+    return CommandResult(
+        success=False,
+        output=json.dumps(
+            {
+                "message": "Falha ao encerrar processo.",
+                "scope": scope,
+                "pid": pid,
+                "process_name": process_name or None,
+                "taskkill_output": output,
+                "exit_code": proc.returncode,
+            },
+            ensure_ascii=False,
+        ),
+        error_code="KILL_PROCESS_FAILED",
+    )
 
 def _run_service_action(
     payload: dict[str, Any] | None,
@@ -1916,7 +2005,263 @@ if ($IncludeRecentSoftware) {
         )
 
 
+
+_PB_ALLOWED_COMMANDS = {
+    "collect_inventory",
+    "list_printers",
+    "list_printer_drivers",
+    "discover_network_printers",
+    "collect_diagnostics",
+    "collect_processes",
+    "collect_services",
+    "collect_software_inventory",
+    "collect_security_inventory",
+    "restart_spooler",
+    "clear_print_queue",
+    "set_default_printer",
+    "print_test_page",
+    "remove_printer",
+    "install_network_printer",
+    "kill_process",
+    "start_service",
+    "stop_service",
+    "restart_service",
+    "reboot_machine",
+    "shutdown_machine",
+    "cancel_power_action",
+    "update_agent",
+}
+
+_PB_DANGEROUS_PAYLOAD_KEYS = {
+    "script",
+    "powershell",
+    "ps1",
+    "cmd",
+    "cmdline",
+    "command",
+    "command_line",
+    "shell",
+    "code",
+    "raw",
+    "bat",
+    "exe",
+}
+
+_PB_DANGEROUS_TEXT_CHARS = {"`", "\"", "'", ";", "&", "|", "<", ">", "$"}
+
+
+def _printerbridge_policy_error(message: str) -> CommandResult:
+    return CommandResult(
+        success=False,
+        output=message,
+        error_code="COMMAND_POLICY_VIOLATION",
+    )
+
+
+def _pb_scan_payload(value, path="payload"):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            key_text = str(key).strip().lower()
+            if key_text in _PB_DANGEROUS_PAYLOAD_KEYS:
+                raise ValueError(f"Payload field not allowed: {path}.{key}")
+            _pb_scan_payload(item, f"{path}.{key}")
+
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            _pb_scan_payload(item, f"{path}[{index}]")
+
+
+def _pb_check_payload_size(payload):
+    import json
+
+    try:
+        encoded = json.dumps(payload, ensure_ascii=False)
+    except TypeError:
+        raise ValueError("Payload must be JSON serializable")
+
+    if len(encoded.encode("utf-8")) > 20000:
+        raise ValueError("Payload too large")
+
+
+def _pb_safe_text(payload, field, required=False, max_len=256):
+    value = payload.get(field)
+
+    if value is None or value == "":
+        if required:
+            raise ValueError(f"Missing required field: {field}")
+        return None
+
+    if not isinstance(value, str):
+        raise ValueError(f"Invalid field type: {field}")
+
+    value = value.strip()
+
+    if not value:
+        if required:
+            raise ValueError(f"Missing required field: {field}")
+        return None
+
+    if len(value) > max_len:
+        raise ValueError(f"Field too long: {field}")
+
+    if any(ord(ch) < 32 for ch in value):
+        raise ValueError(f"Invalid control character in field: {field}")
+
+    if any(ch in _PB_DANGEROUS_TEXT_CHARS for ch in value):
+        raise ValueError(f"Unsafe character in field: {field}")
+
+    return value
+
+
+def _pb_safe_int(payload, field, required=False, minimum=0, maximum=65535):
+    value = payload.get(field)
+
+    if value is None or value == "":
+        if required:
+            raise ValueError(f"Missing required field: {field}")
+        return None
+
+    try:
+        value_int = int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"Invalid integer field: {field}")
+
+    if value_int < minimum or value_int > maximum:
+        raise ValueError(f"Field out of range: {field}")
+
+    return value_int
+
+
+def _pb_validate_ip(payload, field):
+    import ipaddress
+
+    value = payload.get(field)
+
+    if not value or not isinstance(value, str):
+        raise ValueError(f"Missing required field: {field}")
+
+    try:
+        ipaddress.ip_address(value.strip())
+    except ValueError:
+        raise ValueError(f"Invalid IP address: {field}")
+
+
+def _pb_validate_network(payload, field):
+    import ipaddress
+
+    value = payload.get(field)
+
+    if value is None or value == "":
+        return
+
+    if not isinstance(value, str):
+        raise ValueError(f"Invalid network field: {field}")
+
+    try:
+        ipaddress.ip_network(value.strip(), strict=False)
+    except ValueError:
+        raise ValueError(f"Invalid network field: {field}")
+
+
+def _pb_validate_install_network_printer(payload):
+    install_method = str(payload.get("install_method") or "tcp_ip").strip().lower()
+
+    if install_method not in {"tcp_ip", "smb_share"}:
+        raise ValueError("Invalid install_method")
+
+    _pb_safe_text(payload, "printer_name", required=True, max_len=128)
+    _pb_safe_text(payload, "driver_name", required=False, max_len=256)
+    _pb_safe_text(payload, "queue_name", required=False, max_len=128)
+
+    if install_method == "smb_share":
+        share_path = _pb_safe_text(payload, "share_path", required=True, max_len=260)
+        if not share_path.startswith("\\\\"):
+            raise ValueError("Invalid SMB share path")
+        return
+
+    _pb_validate_ip(payload, "ip")
+
+    protocol = str(payload.get("protocol") or "tcp_9100").strip().lower()
+    if protocol not in {"tcp_9100", "lpr_515"}:
+        raise ValueError("Invalid printer protocol")
+
+    port = _pb_safe_int(payload, "port", required=False, minimum=1, maximum=65535)
+
+    if protocol == "tcp_9100" and port not in {None, 9100}:
+        raise ValueError("Invalid port for tcp_9100")
+
+    if protocol == "lpr_515":
+        if port not in {None, 515}:
+            raise ValueError("Invalid port for lpr_515")
+        _pb_safe_text(payload, "queue_name", required=True, max_len=128)
+
+
+def _printerbridge_policy_validate_command(command_type, payload):
+    command_type = str(command_type or "").strip()
+    payload = payload or {}
+
+    try:
+        if command_type not in _PB_ALLOWED_COMMANDS:
+            raise ValueError(f"Unsupported command type: {command_type}")
+
+        if not isinstance(payload, dict):
+            raise ValueError("Payload must be an object")
+
+        _pb_check_payload_size(payload)
+        _pb_scan_payload(payload)
+
+        if command_type == "discover_network_printers":
+            _pb_validate_network(payload, "network")
+
+        if command_type in {"set_default_printer", "print_test_page", "remove_printer", "clear_print_queue"}:
+            _pb_safe_text(payload, "printer_name", required=True, max_len=128)
+
+        if command_type == "install_network_printer":
+            _pb_validate_install_network_printer(payload)
+
+        if command_type in {"start_service", "stop_service", "restart_service"}:
+            _pb_safe_text(payload, "service_name", required=True, max_len=128)
+
+        if command_type == "kill_process":
+            process_id = payload.get("process_id")
+            process_name = payload.get("process_name")
+            scope = _pb_safe_text(payload, "scope", required=False, max_len=32) or "single"
+
+            if scope not in {"single", "tree", "all_by_name", "browser_root"}:
+                raise ValueError("Invalid kill_process scope")
+
+            if process_id in {None, ""} and process_name in {None, ""}:
+                raise ValueError("Missing process_id or process_name")
+
+            if scope in {"all_by_name", "browser_root"} and process_name in {None, ""}:
+                raise ValueError("Missing process_name for selected scope")
+
+            if process_id not in {None, ""}:
+                _pb_safe_int(payload, "process_id", required=True, minimum=1, maximum=999999)
+
+            if process_name not in {None, ""}:
+                _pb_safe_text(payload, "process_name", required=True, max_len=128)
+
+        if command_type in {"reboot_machine", "shutdown_machine"}:
+            _pb_safe_int(payload, "delay_seconds", required=False, minimum=0, maximum=86400)
+            _pb_safe_text(payload, "message", required=False, max_len=256)
+
+        if command_type == "update_agent":
+            _pb_safe_text(payload, "version", required=False, max_len=64)
+            _pb_safe_text(payload, "release_id", required=False, max_len=128)
+            _pb_safe_text(payload, "sha256", required=False, max_len=128)
+
+    except ValueError as exc:
+        return _printerbridge_policy_error(str(exc))
+
+    return None
+
+
 def execute_command(command_type: str, payload: dict[str, Any]) -> CommandResult:
+    policy_error = _printerbridge_policy_validate_command(command_type, payload or {})
+    if policy_error is not None:
+        return policy_error
+
     if command_type == "collect_software_inventory":
         return collect_software_inventory(payload)
 

@@ -4,14 +4,17 @@ import logging
 from typing import Optional
 from uuid import UUID, uuid4
 from datetime import datetime, timezone, timedelta
+from sqlalchemy import select
 
 from app.repositories.base import BaseRepository 
 from app.repositories.command_repository import CommandRepository
 from app.schemas.command import CommandCreate, CommandResponse
 from app.workers.rabbitmq import rabbitmq_client
 from app.infrastructure.database.enums import CommandStatus, EventSeverity
+from app.infrastructure.database.models import Agent
 from app.services.agent_event_service import AgentEventService
 from app.websocket.manager import websocket_manager # NOVO IMPORT
+from app.services.command_policy import validate_and_authorize_command
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +23,35 @@ class CommandService:
         self.repository = repository
         self.audit_repository = audit_repository
 
-    async def dispatch_command(self, tenant_id: UUID, agent_id: UUID, user_id: UUID, command_in: CommandCreate) -> CommandResponse:
+    async def dispatch_command(self, tenant_id: UUID, agent_id: UUID, user_id: UUID, command_in: CommandCreate, user_permissions: Optional[list[str]] = None) -> CommandResponse:
         correlation_id = str(uuid4()) 
         now = datetime.now(timezone.utc)
+        
+        # Segurança multi-tenant:
+        # nunca cria comando para um agent_id que não pertença ao tenant do usuário.
+        agent_result = await self.repository.session.execute(
+            select(Agent).where(
+                Agent.id == agent_id,
+                Agent.tenant_id == tenant_id,
+            )
+        )
+        agent = agent_result.scalar_one_or_none()
+
+        if not agent:
+            raise PermissionError("Agent not found in current tenant")
+
+        enrollment_status = str(getattr(agent.enrollment_status, "value", agent.enrollment_status)).lower()
+        if agent.revoked_at is not None or enrollment_status == "revoked":
+            raise PermissionError("Agent revoked")
+
+        if enrollment_status != "approved":
+            raise PermissionError("Agent not approved")
+
+        validate_and_authorize_command(
+            command_type=command_in.command_type,
+            payload=command_in.payload or {},
+            permissions=user_permissions or [],
+        )
         
         # Define o tempo limite de validade do comando para fins de expiração na fila
         expiration_time = now + timedelta(seconds=command_in.timeout_seconds)

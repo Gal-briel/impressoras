@@ -8,7 +8,8 @@ import psycopg2
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from psycopg2.extras import RealDictCursor
 
-from app.core.dependencies import CurrentUser, get_current_user
+from app.core.dependencies import CurrentUser, require_permissions
+from app.core.config import get_sync_database_url
 
 
 router = APIRouter(
@@ -16,14 +17,10 @@ router = APIRouter(
     tags=["Software inventory changes"],
 )
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://saas:saas@localhost:5432/saas_platform",
-)
 
 
 def get_connection():
-    return psycopg2.connect(DATABASE_URL)
+    return psycopg2.connect(get_sync_database_url())
 
 
 def serialize_value(value: Any) -> Any:
@@ -64,7 +61,7 @@ def get_current_tenant_id(current_user: CurrentUser) -> str:
 
 @router.get("/summary")
 def get_software_inventory_changes_summary(
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["software-inventory:read"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
 
@@ -150,7 +147,7 @@ def list_active_software_inventory_changes(
     search: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["software-inventory:read"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
 
@@ -281,7 +278,7 @@ def ensure_agent_belongs_to_tenant(cur, agent_id: str, tenant_id: str) -> None:
 @router.get("/agents/{agent_id}/summary")
 def get_agent_software_inventory_changes_summary(
     agent_id: UUID,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["software-inventory:read"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
 
@@ -339,7 +336,7 @@ def list_agent_active_software_inventory_changes(
     search: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["software-inventory:read"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
 

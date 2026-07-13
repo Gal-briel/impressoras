@@ -8,7 +8,8 @@ import psycopg2
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from psycopg2.extras import RealDictCursor
 
-from app.core.dependencies import CurrentUser, get_current_user
+from app.core.dependencies import CurrentUser, require_permissions
+from app.core.config import get_sync_database_url
 
 
 router = APIRouter(
@@ -16,10 +17,6 @@ router = APIRouter(
     tags=["Persisted inventory"],
 )
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://saas:saas@localhost:5432/saas_platform",
-)
 
 
 def serialize_value(value: Any) -> Any:
@@ -49,7 +46,7 @@ def serialize_row(row: dict[str, Any] | None) -> dict[str, Any] | None:
 
 
 def get_connection():
-    return psycopg2.connect(DATABASE_URL)
+    return psycopg2.connect(get_sync_database_url())
 
 
 def parse_uuid(value: str, field_name: str) -> str:
@@ -92,7 +89,7 @@ def list_software_inventory(
     search: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["inventory:read"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
     agent_uuid = parse_uuid(agent_id, "agent_id")
@@ -177,7 +174,7 @@ def list_software_inventory(
 @router.get("/software-inventory/sources")
 def list_software_inventory_sources(
     agent_id: str,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["inventory:read"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
     agent_uuid = parse_uuid(agent_id, "agent_id")
@@ -224,7 +221,7 @@ def list_software_inventory_sources(
 @router.get("/security-snapshot/latest")
 def get_latest_security_snapshot(
     agent_id: str,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["inventory:read"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
     agent_uuid = parse_uuid(agent_id, "agent_id")
@@ -284,7 +281,7 @@ def list_security_snapshots(
     agent_id: str,
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["inventory:read"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
     agent_uuid = parse_uuid(agent_id, "agent_id")
@@ -342,7 +339,7 @@ def list_software_inventory_snapshots(
     agent_id: str,
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["inventory:read"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
     agent_uuid = parse_uuid(agent_id, "agent_id")
@@ -403,7 +400,7 @@ def list_software_inventory_snapshot_items(
     search: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["inventory:read"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
     agent_uuid = parse_uuid(agent_id, "agent_id")
@@ -515,7 +512,7 @@ def list_software_inventory_snapshot_items(
 def compare_latest_software_inventory_snapshots(
     agent_id: str,
     limit: int = Query(default=50, ge=1, le=500),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["inventory:read"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
     agent_uuid = parse_uuid(agent_id, "agent_id")
@@ -945,7 +942,7 @@ def _build_security_alerts(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
 @router.get("/security-alerts/latest")
 def get_latest_security_alerts(
     agent_id: str,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["inventory:read"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
     agent_uuid = parse_uuid(agent_id, "agent_id")
@@ -1022,7 +1019,7 @@ def get_latest_security_alerts(
 @router.get("/security-snapshot/compare/latest")
 def compare_latest_security_snapshots(
     agent_id: str,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["inventory:read"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
     agent_uuid = parse_uuid(agent_id, "agent_id")

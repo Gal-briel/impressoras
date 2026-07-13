@@ -17,6 +17,7 @@ from app.infrastructure.database.models import Agent, Command
 from app.infrastructure.database.enums import CommandStatus
 from app.schemas.command import CommandCreate, CommandResponse
 from app.services.command_service import CommandService
+from app.services.command_policy import CommandPermissionDenied, CommandPolicyViolation
 from app.core.dependencies import require_agent_auth
 
 router = APIRouter(tags=["commands"])
@@ -75,7 +76,10 @@ async def list_commands(
     stmt = (
         select(Command, Agent.hostname)
         .join(Agent, Command.agent_id == Agent.id)
-        .where(Command.tenant_id == UUID(current_user.tenant_id))
+        .where(
+            Command.tenant_id == UUID(current_user.tenant_id),
+            Agent.tenant_id == UUID(current_user.tenant_id),
+        )
         .order_by(Command.created_at.desc())
         .limit(limit)
     )
@@ -112,6 +116,7 @@ async def get_command(
         .where(
             Command.id == command_id,
             Command.tenant_id == UUID(current_user.tenant_id),
+            Agent.tenant_id == UUID(current_user.tenant_id),
         )
     )
 
@@ -141,6 +146,7 @@ async def list_agent_commands(
         .where(
             Command.agent_id == agent_id,
             Command.tenant_id == UUID(current_user.tenant_id),
+            Agent.tenant_id == UUID(current_user.tenant_id),
         )
         .order_by(Command.created_at.desc())
         .limit(limit)
@@ -170,12 +176,29 @@ async def create_command(
     current_user: CurrentUser = Depends(require_permissions(["commands:execute"])),
     command_service: CommandService = Depends(get_command_service),
 ):
-    return await command_service.dispatch_command(
-        tenant_id=UUID(current_user.tenant_id),
-        agent_id=agent_id,
-        user_id=UUID(current_user.id),
-        command_in=command_in,
-    )
+    try:
+        return await command_service.dispatch_command(
+            tenant_id=UUID(current_user.tenant_id),
+            agent_id=agent_id,
+            user_id=UUID(current_user.id),
+            command_in=command_in,
+            user_permissions=current_user.permissions,
+        )
+    except CommandPermissionDenied as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        )
+    except CommandPolicyViolation as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+    except PermissionError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Agent not found",
+        )
 
 
 @router.get("/agent/commands/pending")
@@ -185,12 +208,25 @@ async def agent_list_pending_commands(
     session: AsyncSession = Depends(get_db_session),
 ):
     agent_uuid = UUID(agent_id)
+
+    agent_result = await session.execute(
+        select(Agent).where(Agent.id == agent_uuid)
+    )
+    agent = agent_result.scalar_one_or_none()
+
+    if not agent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Agent not found",
+        )
+
     now = datetime.now(timezone.utc)
 
     result = await session.execute(
         select(Command)
         .where(
             Command.agent_id == agent_uuid,
+            Command.tenant_id == agent.tenant_id,
             Command.status.in_([
                 CommandStatus.QUEUED.value,
                 CommandStatus.DISPATCHED.value,
@@ -241,10 +277,22 @@ async def agent_update_command_status(
 ):
     agent_uuid = UUID(agent_id)
 
+    agent_result = await session.execute(
+        select(Agent).where(Agent.id == agent_uuid)
+    )
+    agent = agent_result.scalar_one_or_none()
+
+    if not agent:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Agent not found",
+        )
+
     result = await session.execute(
         select(Command).where(
             Command.id == command_id,
             Command.agent_id == agent_uuid,
+            Command.tenant_id == agent.tenant_id,
         )
     )
 

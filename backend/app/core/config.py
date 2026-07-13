@@ -82,3 +82,28 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def get_sync_database_url() -> str:
+    """Retorna URL síncrona compatível com psycopg2.
+
+    Prioridade:
+    1. SYNC_DATABASE_URL
+    2. DATABASE_URL convertido de postgresql+asyncpg:// para postgresql://
+    3. settings.SQLALCHEMY_DATABASE_URI convertido
+    """
+    import os
+
+    sync_url = os.getenv("SYNC_DATABASE_URL")
+    if sync_url:
+        return sync_url.replace("postgresql+asyncpg://", "postgresql://")
+
+    database_url = os.getenv("DATABASE_URL")
+    if database_url:
+        return database_url.replace("postgresql+asyncpg://", "postgresql://")
+
+    return str(settings.SQLALCHEMY_DATABASE_URI).replace(
+        "postgresql+asyncpg://",
+        "postgresql://",
+    )
+
