@@ -41,6 +41,11 @@ const commandOptions: Array<{ value: CommandType; label: string; description: st
     description: 'Instala uma impressora de rede no computador do agente selecionado.',
   },
   {
+    value: 'list_printer_drivers',
+    label: 'Listar drivers de impressora',
+    description: 'Lista os drivers de impressora instalados no computador do agente.',
+  },
+  {
     value: 'restart_service',
     label: 'Reiniciar serviço',
     description: 'Reinicia um serviço específico pelo nome.',

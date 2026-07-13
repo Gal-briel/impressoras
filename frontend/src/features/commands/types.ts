@@ -25,6 +25,7 @@ export type CommandType =
   | 'update_agent'
   | 'install_printer'
   | 'install_network_printer'
+  | 'list_printer_drivers'
   | 'restart_service'
   | 'set_default_printer'
   | 'remove_printer'

@@ -336,6 +336,32 @@ export function PrintersPage() {
     });
   }
 
+
+  async function handleListPrinterDrivers() {
+    if (!installForm?.targetAgentId) {
+      setInstallError('Selecione o computador de destino antes de consultar os drivers.');
+      return;
+    }
+
+    setInstallError('');
+    setInstallMessage('');
+
+    const targetAgent = agentsById.get(installForm.targetAgentId);
+
+    await createCommandMutation.mutateAsync({
+      agent_id: installForm.targetAgentId,
+      command_type: 'list_printer_drivers',
+      payload: {
+        source: 'printers_page_install_modal',
+      },
+      timeout_seconds: 60,
+    });
+
+    setInstallMessage(
+      `Consulta de drivers enviada para ${getAgentName(targetAgent)}. Veja o resultado na aba Comandos do agente e copie o driver desejado para o campo Driver.`
+    );
+  }
+
   async function handleInstallPrinter() {
     if (!installSelection || !installForm) return;
 
@@ -799,6 +825,15 @@ export function PrintersPage() {
                             placeholder="Ex: EPSON L355 Series"
                             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                           />
+
+                          <button
+                            type="button"
+                            onClick={handleListPrinterDrivers}
+                            disabled={createCommandMutation.isPending || !installForm.targetAgentId}
+                            className="mt-2 w-full rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+                          >
+                            Consultar drivers do destino
+                          </button>
                         </label>
                       </div>
 

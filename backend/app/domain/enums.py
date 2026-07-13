@@ -27,6 +27,7 @@ class CommandType(str, Enum):
     LIST_PRINTERS = "list_printers"
     INSTALL_PRINTER = "install_printer"
     INSTALL_NETWORK_PRINTER = "install_network_printer"
+    LIST_PRINTER_DRIVERS = "list_printer_drivers"
     RESTART_SERVICE = "restart_service"
     RUN_SCRIPT_APPROVED = "run_script_approved"
 

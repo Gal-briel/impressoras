@@ -2355,6 +2355,72 @@ Write-Output "Fila de impressão limpa."
                 error_code=status_value or "install_network_printer_failed",
             )
 
+        if command_type == "list_printer_drivers":
+            import json
+            import subprocess
+
+            try:
+                proc = subprocess.run(
+                    [
+                        "powershell.exe",
+                        "-NoProfile",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-Command",
+                        "Get-PrinterDriver | Select-Object -ExpandProperty Name | Sort-Object -Unique | ConvertTo-Json -Compress",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+
+                raw_output = (proc.stdout or "").strip()
+                raw_error = (proc.stderr or "").strip()
+
+                if proc.returncode != 0:
+                    result = {
+                        "status": "powershell_error",
+                        "message": raw_error or "Falha ao listar drivers de impressora.",
+                    }
+
+                    return CommandResult(
+                        success=False,
+                        output=json.dumps(result, ensure_ascii=False, indent=2),
+                        error_code="list_printer_drivers_failed",
+                    )
+
+                drivers = []
+
+                if raw_output:
+                    try:
+                        parsed = json.loads(raw_output)
+                        drivers = parsed if isinstance(parsed, list) else [parsed]
+                    except Exception:
+                        drivers = raw_output.splitlines()
+
+                result = {
+                    "status": "success",
+                    "total": len(drivers),
+                    "drivers": drivers,
+                }
+
+                return CommandResult(
+                    success=True,
+                    output=json.dumps(result, ensure_ascii=False, indent=2),
+                )
+
+            except Exception as exc:
+                result = {
+                    "status": "error",
+                    "message": str(exc),
+                }
+
+                return CommandResult(
+                    success=False,
+                    output=json.dumps(result, ensure_ascii=False, indent=2),
+                    error_code="list_printer_drivers_error",
+                )
+
         return CommandResult(
             success=False,
             output=f"Tipo de comando não suportado: {command_type}",
