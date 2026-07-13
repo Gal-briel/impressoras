@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react';
 import { Badge } from '../../../components/ui/Badge';
 import { Card } from '../../../components/ui/Card';
 import { useAgents } from '../../agents/hooks/useAgents';
+import { useCreateCommand } from '../../commands/hooks/useCommands';
 import { usePrinters } from '../hooks/usePrinters';
 import type { Printer } from '../types';
 import { PrinterStatusBadge } from '../components/PrinterStatusBadge';
@@ -23,8 +24,6 @@ type LooseAgent = {
   agent_group_name?: string | null;
   domain_name?: string | null;
   agent_domain_name?: string | null;
-  grouping_source?: string | null;
-  grouping_status?: string | null;
 };
 
 type InstallSelection = {
@@ -32,6 +31,21 @@ type InstallSelection = {
   sourceNetwork: string;
   sourceCompanyKey: string;
 } | null;
+
+type InstallMethod = 'tcp_ip' | 'smb_share';
+type NetworkPrinterProtocol = 'tcp_9100' | 'lpr_515';
+
+type InstallForm = {
+  targetAgentId: string;
+  printerName: string;
+  installMethod: InstallMethod;
+  sharePath: string;
+  ip: string;
+  protocol: NetworkPrinterProtocol;
+  port: string;
+  driverName: string;
+  queueName: string;
+};
 
 function getPrinterName(printer: Printer) {
   return printer.name || printer.printer_name || 'Impressora sem nome';
@@ -92,6 +106,48 @@ function getPrinterCompanyKey(printer: Printer, sourceAgent?: LooseAgent | null)
   return getCompanyKey(getPrinterCompanyName(printer, sourceAgent));
 }
 
+function extractIp(value?: string | null) {
+  if (!value) return '';
+
+  const match = String(value).match(/(\d{1,3}(?:\.\d{1,3}){3})/);
+  return match?.[1] || '';
+}
+
+function getSuggestedPrinterIp(printer: Printer) {
+  return extractIp(printer.port_name) || extractIp(printer.share_name) || '';
+}
+
+function getSuggestedProtocol(printer: Printer): NetworkPrinterProtocol {
+  const port = String(printer.port_name || '').toLowerCase();
+
+  if (port.includes('lpr') || port.includes('515')) {
+    return 'lpr_515';
+  }
+
+  return 'tcp_9100';
+}
+
+function defaultPortForProtocol(protocol: NetworkPrinterProtocol) {
+  return protocol === 'lpr_515' ? '515' : '9100';
+}
+
+function getInitialInstallForm(printer: Printer): InstallForm {
+  const protocol = getSuggestedProtocol(printer);
+  const shareName = String(printer.share_name || '');
+
+  return {
+    targetAgentId: '',
+    printerName: getPrinterName(printer),
+    installMethod: shareName.startsWith('\\\\') ? 'smb_share' : 'tcp_ip',
+    sharePath: shareName.startsWith('\\\\') ? shareName : '',
+    ip: getSuggestedPrinterIp(printer),
+    protocol,
+    port: defaultPortForProtocol(protocol),
+    driverName: printer.driver_name || '',
+    queueName: '',
+  };
+}
+
 function isVirtualPrinter(printer: Printer) {
   const name = getPrinterName(printer).toLowerCase();
   const driver = String(printer.driver_name || '').toLowerCase();
@@ -129,11 +185,15 @@ function isExpanded(map: Record<string, boolean>, key: string) {
 export function PrintersPage() {
   const [search, setSearch] = useState('');
   const [installSelection, setInstallSelection] = useState<InstallSelection>(null);
+  const [installForm, setInstallForm] = useState<InstallForm | null>(null);
+  const [installMessage, setInstallMessage] = useState('');
+  const [installError, setInstallError] = useState('');
   const [expandedCompanies, setExpandedCompanies] = useState<Record<string, boolean>>({});
   const [expandedNetworks, setExpandedNetworks] = useState<Record<string, boolean>>({});
 
   const { data, isLoading, isError, error, refetch, isFetching } = usePrinters();
   const agentsQuery = useAgents();
+  const createCommandMutation = useCreateCommand();
 
   const printers = data?.items || [];
   const agents = (agentsQuery.data?.items || []) as LooseAgent[];
@@ -251,6 +311,99 @@ export function PrintersPage() {
     }));
   }
 
+  function openInstallModal(printer: Printer, sourceNetwork: string, sourceCompanyKey: string) {
+    setInstallSelection({ printer, sourceNetwork, sourceCompanyKey });
+    setInstallForm(getInitialInstallForm(printer));
+    setInstallMessage('');
+    setInstallError('');
+  }
+
+  function closeInstallModal() {
+    setInstallSelection(null);
+    setInstallForm(null);
+    setInstallMessage('');
+    setInstallError('');
+  }
+
+  function updateInstallForm(partial: Partial<InstallForm>) {
+    setInstallForm((current) => (current ? { ...current, ...partial } : current));
+  }
+
+  function handleProtocolChange(protocol: NetworkPrinterProtocol) {
+    updateInstallForm({
+      protocol,
+      port: defaultPortForProtocol(protocol),
+    });
+  }
+
+  async function handleInstallPrinter() {
+    if (!installSelection || !installForm) return;
+
+    setInstallMessage('');
+    setInstallError('');
+
+    if (!installForm.targetAgentId) {
+      setInstallError('Selecione o computador de destino.');
+      return;
+    }
+
+    if (!installForm.printerName.trim()) {
+      setInstallError('Informe o nome da impressora no Windows.');
+      return;
+    }
+
+    if (installForm.installMethod === 'smb_share' && !installForm.sharePath.trim()) {
+      setInstallError('Informe o caminho compartilhado da impressora.');
+      return;
+    }
+
+    if (installForm.installMethod === 'tcp_ip' && !installForm.ip.trim()) {
+      setInstallError('Informe o IP da impressora.');
+      return;
+    }
+
+    const parsedPort = Number(installForm.port || defaultPortForProtocol(installForm.protocol));
+
+    const payload: Record<string, unknown> = {
+      source: 'printers_page',
+      source_agent_id: installSelection.printer.agent_id,
+      source_agent_hostname: installSelection.printer.agent_hostname,
+      source_network: installSelection.sourceNetwork,
+      source_company_key: installSelection.sourceCompanyKey,
+      printer_id: installSelection.printer.id,
+      printer_name: installForm.printerName.trim(),
+      install_method: installForm.installMethod,
+      driver_name: installForm.driverName.trim() || null,
+      timeout_seconds: 180,
+    };
+
+    if (installForm.installMethod === 'smb_share') {
+      payload.share_path = installForm.sharePath.trim();
+    } else {
+      payload.ip = installForm.ip.trim();
+      payload.protocol = installForm.protocol;
+      payload.port = Number.isFinite(parsedPort)
+        ? parsedPort
+        : Number(defaultPortForProtocol(installForm.protocol));
+      payload.port_name = installSelection.printer.port_name || null;
+
+      if (installForm.protocol === 'lpr_515') {
+        payload.queue_name = installForm.queueName.trim() || null;
+      }
+    }
+
+    const targetAgent = agentsById.get(installForm.targetAgentId);
+
+    await createCommandMutation.mutateAsync({
+      agent_id: installForm.targetAgentId,
+      command_type: 'install_network_printer',
+      payload,
+      timeout_seconds: 180,
+    });
+
+    setInstallMessage(`Comando de instalação enviado para ${getAgentName(targetAgent)}.`);
+  }
+
   return (
     <div>
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -349,9 +502,7 @@ export function PrintersPage() {
                 <div className="border-b border-slate-200 bg-white p-5">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                      <h2 className="text-xl font-bold text-slate-950">
-                        {company.name}
-                      </h2>
+                      <h2 className="text-xl font-bold text-slate-950">{company.name}</h2>
                       <p className="mt-1 text-sm text-slate-500">
                         {companyAgents.length} agente(s) · {company.networks.length} rede(s) · {company.printers.length} impressora(s)
                       </p>
@@ -459,7 +610,7 @@ export function PrintersPage() {
 
                                         {!installable && (
                                           <p className="mt-3 text-xs text-amber-700">
-                                            Esta impressora não está disponível para instalação remota nesta etapa. Impressoras virtuais ou sem porta/compartilhamento não serão replicadas.
+                                            Impressoras virtuais ou sem porta/compartilhamento não serão replicadas.
                                           </p>
                                         )}
                                       </div>
@@ -467,7 +618,7 @@ export function PrintersPage() {
                                       <div className="flex shrink-0 flex-wrap gap-2">
                                         <button
                                           disabled={!installable}
-                                          onClick={() => setInstallSelection({ printer, sourceNetwork, sourceCompanyKey })}
+                                          onClick={() => openInstallModal(printer, sourceNetwork, sourceCompanyKey)}
                                           className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
                                         >
                                           Instalar em um computador
@@ -499,21 +650,21 @@ export function PrintersPage() {
         </div>
       )}
 
-      {installSelection && selectedPrinter && (
+      {installSelection && selectedPrinter && installForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
-          <Card className="max-h-[90vh] w-full max-w-3xl overflow-y-auto p-6">
+          <Card className="max-h-[90vh] w-full max-w-4xl overflow-y-auto p-6">
             <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <h2 className="text-xl font-bold text-slate-950">
                   Instalar em um computador
                 </h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  Serão exibidos apenas computadores online, aprovados, da mesma empresa/grupo e da mesma rede.
+                  Apenas computadores online, aprovados, da mesma empresa/grupo e da mesma rede são exibidos.
                 </p>
               </div>
 
               <button
-                onClick={() => setInstallSelection(null)}
+                onClick={closeInstallModal}
                 className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
               >
                 Fechar
@@ -522,72 +673,200 @@ export function PrintersPage() {
 
             <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4">
               <p className="text-sm font-semibold text-slate-500">Impressora de origem</p>
-              <p className="mt-1 text-lg font-bold text-slate-950">
-                {getPrinterName(selectedPrinter)}
-              </p>
+              <p className="mt-1 text-lg font-bold text-slate-950">{getPrinterName(selectedPrinter)}</p>
               <div className="mt-2 grid gap-2 text-sm text-slate-600 md:grid-cols-2">
-                <p>
-                  <span className="font-semibold text-slate-700">Empresa/grupo:</span>{' '}
-                  {getPrinterCompanyName(selectedPrinter, selectedSourceAgent)}
-                </p>
-                <p>
-                  <span className="font-semibold text-slate-700">Rede:</span>{' '}
-                  {installSelection.sourceNetwork}
-                </p>
-                <p>
-                  <span className="font-semibold text-slate-700">Origem:</span>{' '}
-                  {selectedPrinter.agent_hostname || getAgentName(selectedSourceAgent)}
-                </p>
-                <p>
-                  <span className="font-semibold text-slate-700">Driver:</span>{' '}
-                  {selectedPrinter.driver_name || 'Driver não identificado'}
-                </p>
+                <p><span className="font-semibold text-slate-700">Empresa/grupo:</span> {getPrinterCompanyName(selectedPrinter, selectedSourceAgent)}</p>
+                <p><span className="font-semibold text-slate-700">Rede:</span> {installSelection.sourceNetwork}</p>
+                <p><span className="font-semibold text-slate-700">Origem:</span> {selectedPrinter.agent_hostname || getAgentName(selectedSourceAgent)}</p>
+                <p><span className="font-semibold text-slate-700">Driver origem:</span> {selectedPrinter.driver_name || '—'}</p>
               </div>
             </div>
 
-            <div className="mt-5">
-              <h3 className="text-sm font-bold uppercase tracking-wide text-slate-500">
-                Computadores disponíveis
-              </h3>
+            <div className="mt-5 grid gap-5 lg:grid-cols-[1fr_1fr]">
+              <div>
+                <h3 className="text-sm font-bold uppercase tracking-wide text-slate-500">
+                  Computador de destino
+                </h3>
 
-              {targetAgents.length === 0 ? (
-                <Card className="mt-3 border-amber-200 bg-amber-50 p-4">
-                  <Badge variant="warning">Nenhum destino disponível</Badge>
-                  <p className="mt-2 text-sm text-amber-700">
-                    Não há outro agente online, aprovado, na mesma empresa/grupo e na mesma rede para receber esta impressora.
-                  </p>
-                </Card>
-              ) : (
-                <div className="mt-3 space-y-3">
-                  {targetAgents.map((agent) => (
-                    <div
-                      key={agent.id}
-                      className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between"
-                    >
-                      <div>
-                        <p className="font-semibold text-slate-950">
-                          {getAgentName(agent)}
-                        </p>
+                {targetAgents.length === 0 ? (
+                  <Card className="mt-3 border-amber-200 bg-amber-50 p-4">
+                    <Badge variant="warning">Nenhum destino disponível</Badge>
+                    <p className="mt-2 text-sm text-amber-700">
+                      Não há outro agente online, aprovado, na mesma empresa/grupo e na mesma rede.
+                    </p>
+                  </Card>
+                ) : (
+                  <div className="mt-3 space-y-3">
+                    {targetAgents.map((agent) => (
+                      <button
+                        key={agent.id}
+                        type="button"
+                        onClick={() => updateInstallForm({ targetAgentId: agent.id })}
+                        className={`w-full rounded-lg border p-4 text-left transition ${
+                          installForm.targetAgentId === agent.id
+                            ? 'border-emerald-400 bg-emerald-50 ring-2 ring-emerald-100'
+                            : 'border-slate-200 bg-white hover:bg-slate-50'
+                        }`}
+                      >
+                        <p className="font-semibold text-slate-950">{getAgentName(agent)}</p>
                         <p className="mt-1 text-sm text-slate-500">
-                          IP: {getAgentIp(agent) || '—'} · Rede: {getAgentNetwork(agent) || '—'} · Grupo: {getAgentCompanyName(agent)}
+                          IP: {getAgentIp(agent) || '—'} · Rede: {getAgentNetwork(agent) || '—'}
                         </p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <h3 className="text-sm font-bold uppercase tracking-wide text-slate-500">
+                  Dados de instalação
+                </h3>
+
+                <div className="mt-3 space-y-4 rounded-xl border border-slate-200 bg-white p-4">
+                  <label className="block">
+                    <span className="mb-1.5 block text-sm font-medium text-slate-700">Nome no Windows</span>
+                    <input
+                      value={installForm.printerName}
+                      onChange={(event) => updateInstallForm({ printerName: event.target.value })}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    />
+                  </label>
+
+                  <label className="block">
+                    <span className="mb-1.5 block text-sm font-medium text-slate-700">Método</span>
+                    <select
+                      value={installForm.installMethod}
+                      onChange={(event) => updateInstallForm({ installMethod: event.target.value as InstallMethod })}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    >
+                      <option value="tcp_ip">TCP/IP ou LPR</option>
+                      <option value="smb_share">Compartilhamento SMB</option>
+                    </select>
+                  </label>
+
+                  {installForm.installMethod === 'smb_share' ? (
+                    <label className="block">
+                      <span className="mb-1.5 block text-sm font-medium text-slate-700">Caminho compartilhado</span>
+                      <input
+                        value={installForm.sharePath}
+                        onChange={(event) => updateInstallForm({ sharePath: event.target.value })}
+                        placeholder="\\SERVIDOR\IMPRESSORA"
+                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      />
+                    </label>
+                  ) : (
+                    <>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <label className="block">
+                          <span className="mb-1.5 block text-sm font-medium text-slate-700">IP da impressora</span>
+                          <input
+                            value={installForm.ip}
+                            onChange={(event) => updateInstallForm({ ip: event.target.value })}
+                            placeholder="10.34.10.230"
+                            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                          />
+                        </label>
+
+                        <label className="block">
+                          <span className="mb-1.5 block text-sm font-medium text-slate-700">Protocolo</span>
+                          <select
+                            value={installForm.protocol}
+                            onChange={(event) => handleProtocolChange(event.target.value as NetworkPrinterProtocol)}
+                            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                          >
+                            <option value="tcp_9100">TCP/IP 9100</option>
+                            <option value="lpr_515">LPR 515</option>
+                          </select>
+                        </label>
                       </div>
 
-                      <button
-                        disabled
-                        className="rounded-lg bg-slate-200 px-4 py-2 text-sm font-semibold text-slate-500"
-                        title="O comando install_network_printer será criado na próxima etapa."
-                      >
-                        Instalar
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <label className="block">
+                          <span className="mb-1.5 block text-sm font-medium text-slate-700">Porta</span>
+                          <input
+                            value={installForm.port}
+                            onChange={(event) => updateInstallForm({ port: event.target.value })}
+                            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                          />
+                        </label>
 
-              <p className="mt-4 text-xs text-slate-500">
-                Nesta etapa o sistema valida os computadores permitidos. O comando real de instalação será ativado após criarmos o handler install_network_printer no agente Windows.
-              </p>
+                        <label className="block">
+                          <span className="mb-1.5 block text-sm font-medium text-slate-700">Driver</span>
+                          <input
+                            value={installForm.driverName}
+                            onChange={(event) => updateInstallForm({ driverName: event.target.value })}
+                            placeholder="Ex: EPSON L355 Series"
+                            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                          />
+                        </label>
+                      </div>
+
+                      {installForm.protocol === 'lpr_515' && (
+                        <label className="block">
+                          <span className="mb-1.5 block text-sm font-medium text-slate-700">Fila LPR</span>
+                          <input
+                            value={installForm.queueName}
+                            onChange={(event) => updateInstallForm({ queueName: event.target.value })}
+                            placeholder="Ex: print, lp, queue"
+                            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                          />
+                        </label>
+                      )}
+                    </>
+                  )}
+
+                  <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+                    Deixe o driver vazio para o agente retornar a lista de drivers disponíveis no destino.
+                    Para LPR/515, a fila LPR é obrigatória.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {installError && (
+              <Card className="mt-5 border-red-200 bg-red-50 p-4">
+                <p className="text-sm font-semibold text-red-700">{installError}</p>
+              </Card>
+            )}
+
+            {createCommandMutation.isError && (
+              <Card className="mt-5 border-red-200 bg-red-50 p-4">
+                <p className="text-sm font-semibold text-red-700">
+                  Não foi possível enviar o comando.
+                </p>
+                <pre className="mt-2 whitespace-pre-wrap text-xs text-red-600">
+                  {createCommandMutation.error instanceof Error
+                    ? createCommandMutation.error.message
+                    : 'Erro desconhecido'}
+                </pre>
+              </Card>
+            )}
+
+            {installMessage && (
+              <Card className="mt-5 border-emerald-200 bg-emerald-50 p-4">
+                <p className="text-sm font-semibold text-emerald-700">{installMessage}</p>
+                <p className="mt-1 text-sm text-emerald-700">
+                  Acompanhe o resultado na aba Comandos do agente de destino.
+                </p>
+              </Card>
+            )}
+
+            <div className="mt-6 flex flex-col-reverse gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:justify-end">
+              <button
+                onClick={closeInstallModal}
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+              >
+                Cancelar
+              </button>
+
+              <button
+                onClick={handleInstallPrinter}
+                disabled={createCommandMutation.isPending || targetAgents.length === 0}
+                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
+              >
+                {createCommandMutation.isPending ? 'Enviando...' : 'Enviar instalação'}
+              </button>
             </div>
           </Card>
         </div>

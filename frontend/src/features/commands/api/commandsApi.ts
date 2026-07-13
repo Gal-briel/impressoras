@@ -71,8 +71,8 @@ export async function createCommand(payload: CreateCommandPayload): Promise<Comm
     {
       command_type: payload.command_type,
       payload: payload.payload || {},
-      timeout_seconds: 60,
-      idempotency_key: createIdempotencyKey(),
+      timeout_seconds: payload.timeout_seconds ?? 60,
+      idempotency_key: payload.idempotency_key || createIdempotencyKey(),
     }
   );
 
