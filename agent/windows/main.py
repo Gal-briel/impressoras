@@ -328,7 +328,13 @@ def main() -> int:
 
     while True:
         try:
-            check_in = client.check_in(agent_version)
+            check_in = client.check_in(
+                agent_version,
+                hostname=socket.gethostname(),
+                mac_address=get_primary_mac(),
+                internal_ip=get_internal_ip(),
+                domain_name=get_domain_name(),
+            )
             logging.info("Check-in OK: %s", check_in)
 
             commands = client.get_pending_commands(limit=command_limit)

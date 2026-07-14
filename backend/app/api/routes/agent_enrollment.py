@@ -42,6 +42,7 @@ class AgentEnrollRequest(BaseModel):
     agent_version: str = "unknown"
     internal_ip: str | None = None
     domain_name: str | None = None
+    domain: str | None = None
     capabilities: list[str] | None = None
 
 
@@ -49,6 +50,13 @@ class AgentEnrollResponse(BaseModel):
     agent_id: str
     api_key: str
     enrollment_status: str
+
+
+def _normalize_domain(value: str | None) -> str | None:
+    cleaned = str(value or "").strip().strip(".").lower()
+    if not cleaned:
+        return None
+    return cleaned[:255]
 
 
 def _normalize_mac(mac_address: str) -> str:
@@ -190,7 +198,7 @@ async def enroll_agent(
     os_version = _clean_text(payload.os_version, "unknown", 100)
     agent_version = _clean_text(payload.agent_version, "unknown", 50)
     internal_ip = _clean_text(payload.internal_ip, "", 45) or None
-    domain_name = _clean_text(payload.domain_name, "", 255) or None
+    domain_name = _normalize_domain(payload.domain_name or payload.domain)
 
     new_api_key = generate_api_key()
     new_api_key_hash = get_api_key_hash(new_api_key)
@@ -249,7 +257,9 @@ async def enroll_agent(
                 SELECT id, revoked_at
                 FROM agents
                 WHERE tenant_id = :tenant_id
-                  AND mac_address = :mac_address
+                  AND lower(mac_address) = :mac_address
+                ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
+                LIMIT 1
                 FOR UPDATE;
                 """
             ),

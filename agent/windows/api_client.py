@@ -39,13 +39,22 @@ class GabrielApiClient:
 
         return {}
 
-    def check_in(self, agent_version: str) -> dict[str, Any]:
+    def check_in(
+        self,
+        agent_version: str,
+        hostname: str | None = None,
+        mac_address: str | None = None,
+        internal_ip: str | None = None,
+        domain_name: str | None = None,
+    ) -> dict:
         payload = {
             "agent_version": agent_version,
-            "internal_ip": self._get_local_ip(),
-            "uptime_seconds": int(time.monotonic()),
+            "hostname": hostname,
+            "mac_address": mac_address,
+            "internal_ip": internal_ip,
+            "domain_name": domain_name,
         }
-
+        payload = {key: value for key, value in payload.items() if value}
         return self._request("POST", "/agent/check-in", json=payload)
 
     def report_event(self, event_type: str, message: str, severity: str = "info") -> dict[str, Any]:
