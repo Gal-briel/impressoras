@@ -160,15 +160,18 @@ async def revoke_agent(
             reason=payload.revoke_reason,
         )
 
-        await log_audit_event(
-            tenant_id=current_user.tenant_id,
-            user_id=current_user.id,
-            action="agent_revoked",
-            target_type="agent",
-            target_id=agent_id,
-            ip_address=get_request_ip(request),
-            metadata_payload={"reason": payload.revoke_reason},
-        )
+        try:
+            await log_audit_event(
+                tenant_id=current_user.tenant_id,
+                user_id=current_user.id,
+                action="agent_revoked",
+                target_type="agent",
+                target_id=agent_id,
+                ip_address=get_request_ip(request),
+                metadata_payload={"reason": payload.revoke_reason},
+            )
+        except Exception as exc:
+            print(f"[audit] falha ao auditar revogação do agente {agent_id}: {exc}")
 
         return result
     except ValueError:

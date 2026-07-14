@@ -140,11 +140,14 @@ class AgentService:
             if getattr(tag, "deleted_at", None) is None
         ]
 
+        loaded_group = agent.__dict__.get("group")
+        group_name = getattr(loaded_group, "name", None)
+
         return AgentResponse(
             id=agent.id,
             tenant_id=agent.tenant_id,
             group_id=agent.group_id,
-            group_name=getattr(getattr(agent, "group", None), "name", None),
+            group_name=group_name,
             domain_name=getattr(agent, "domain_name", None),
             grouping_source=getattr(agent, "grouping_source", None),
             grouping_status=getattr(agent, "grouping_status", None),
@@ -199,27 +202,36 @@ class AgentService:
             )
             await self.repository.session.commit()
 
-            await redis_client.safe_delete(f"agent:presence:{str(agent_id)}")
+            try:
+                await redis_client.safe_delete(f"agent:presence:{str(agent_id)}")
+            except Exception as exc:
+                print(f"[agent_revoke] falha ao limpar presença do agente {agent_id}: {exc}")
 
-            await websocket_manager.close_agent_connection(str(agent_id), code=1008, reason="Agent revoked")
-            await websocket_manager.broadcast_event(
-                str(agent.tenant_id),
-                "agent_revoked",
-                {
-                    "agent_id": str(agent.id),
-                    "revoked_at": now.isoformat(),
-                    "revoked_by": str(revoked_by),
-                    "reason": reason,
-                },
-            )
+            try:
+                await websocket_manager.close_agent_connection(str(agent_id), code=1008, reason="Agent revoked")
+                await websocket_manager.broadcast_event(
+                    str(agent.tenant_id),
+                    "agent_revoked",
+                    {
+                        "agent_id": str(agent.id),
+                        "revoked_at": now.isoformat(),
+                        "revoked_by": str(revoked_by),
+                        "reason": reason,
+                    },
+                )
+            except Exception as exc:
+                print(f"[agent_revoke] falha ao notificar websocket do agente {agent_id}: {exc}")
 
-            await AgentEventService.log_event(
-                tenant_id=agent.tenant_id,
-                agent_id=agent.id,
-                event_type="agent_revoked",
-                message=f"Agent access revoked. Reason: {reason}" if reason else "Agent access revoked.",
-                severity=EventSeverity.WARNING,
-            )
+            try:
+                await AgentEventService.log_event(
+                    tenant_id=agent.tenant_id,
+                    agent_id=agent.id,
+                    event_type="agent_revoked",
+                    message=f"Agent access revoked. Reason: {reason}" if reason else "Agent access revoked.",
+                    severity=EventSeverity.WARNING,
+                )
+            except Exception as exc:
+                print(f"[agent_revoke] falha ao registrar evento do agente {agent_id}: {exc}")
 
         return await self._map_to_response(agent)
 
