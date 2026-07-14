@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # Agent/dev
-    AGENT_API_KEY: str = "dev-agent-api-key"
+    AGENT_API_KEY: str | None = None
 
     # Infra
     REDIS_URL: str

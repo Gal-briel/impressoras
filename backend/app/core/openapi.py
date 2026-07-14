@@ -34,7 +34,7 @@ def configure_openapi(app: FastAPI) -> None:
             "type": "apiKey",
             "in": "header",
             "name": "Authorization",
-            "description": "Use exatamente: ApiKey dev-agent-api-key",
+            "description": "Use o formato: ApiKey <chave-do-agente>",
         }
 
         paths = openapi_schema.get("paths", {})
