@@ -23,6 +23,7 @@ from app.api.routes import (
     websockets,
 )
 from app.core.config import settings, validate_runtime_security
+from app.api.routes import agent_enrollment as agent_enrollment_routes
 from app.core.middleware import AuditMiddleware
 from app.core.openapi import configure_openapi
 from app.core.redis import redis_client
@@ -224,3 +225,5 @@ async def add_no_cache_headers_for_spa_html(request, call_next):
 # --- FINAL_AGENT_RUNTIME_INCLUDE ---
 # Registrado ao final para garantir prioridade funcional mesmo com rotas SPA/catch-all.
 app.include_router(agent_runtime_routes.router, prefix=settings.API_V1_STR)
+
+app.include_router(agent_enrollment_routes.router, prefix=settings.API_V1_STR)

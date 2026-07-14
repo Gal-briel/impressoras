@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 import json
+import requests
+import uuid
+import socket
+import platform
+import os
 import logging
 from logging.handlers import RotatingFileHandler
 import sys
@@ -39,11 +44,118 @@ logging.basicConfig(
 def load_config() -> dict[str, Any]:
     if not CONFIG_PATH.exists():
         raise FileNotFoundError(
-            f"Arquivo {CONFIG_PATH} não encontrado. Copie config.example.json para config.json e ajuste agent_id/api_key."
+            f"Arquivo {CONFIG_PATH} não encontrado. Copie config.example.json para config.json e ajuste base_url/enrollment_token."
         )
 
     with CONFIG_PATH.open("r", encoding="utf-8-sig") as file:
         return json.load(file)
+
+
+def save_config(config: dict[str, Any]) -> None:
+    with CONFIG_PATH.open("w", encoding="utf-8") as file:
+        json.dump(config, file, indent=2, ensure_ascii=False)
+        file.write("\n")
+
+
+def normalize_base_url(base_url: str) -> str:
+    value = str(base_url or "").strip().rstrip("/")
+
+    if not value:
+        raise RuntimeError("base_url não configurado no config.json.")
+
+    if not value.endswith("/api/v1"):
+        value = value + "/api/v1"
+
+    return value
+
+
+def get_primary_mac() -> str:
+    node = uuid.getnode()
+    mac = ":".join(f"{(node >> shift) & 0xff:02x}" for shift in range(40, -1, -8))
+
+    if mac == "00:00:00:00:00:00":
+        raise RuntimeError("Não foi possível detectar o MAC address principal.")
+
+    return mac
+
+
+def get_internal_ip() -> str | None:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("8.8.8.8", 80))
+            return sock.getsockname()[0]
+    except Exception:
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except Exception:
+            return None
+
+
+def get_domain_name() -> str | None:
+    for key in ("USERDNSDOMAIN", "USERDOMAIN"):
+        value = os.environ.get(key)
+
+        if value:
+            return value
+
+    return None
+
+
+def ensure_enrolled(config: dict[str, Any]) -> dict[str, Any]:
+    config["base_url"] = normalize_base_url(config.get("base_url", ""))
+
+    if config.get("agent_id") and config.get("api_key"):
+        return config
+
+    enrollment_token = str(config.get("enrollment_token") or "").strip()
+
+    if not enrollment_token:
+        raise RuntimeError(
+            "Agente sem agent_id/api_key e sem enrollment_token. "
+            "Reinstale usando um enrollment token válido."
+        )
+
+    agent_version = str(config.get("agent_version", "0.1.0"))
+
+    payload = {
+        "enrollment_token": enrollment_token,
+        "hostname": socket.gethostname(),
+        "mac_address": get_primary_mac(),
+        "os_version": platform.platform(),
+        "agent_version": agent_version,
+        "internal_ip": get_internal_ip(),
+        "domain_name": get_domain_name(),
+        "capabilities": ["check_in", "commands", "printers"],
+    }
+
+    url = f"{config['base_url']}/agent/enroll"
+
+    logging.info("Realizando enrollment seguro do agente em %s", url)
+
+    response = requests.post(url, json=payload, timeout=30)
+
+    if response.status_code >= 400:
+        raise RuntimeError(
+            f"Enrollment falhou com HTTP {response.status_code}: {response.text[:500]}"
+        )
+
+    data = response.json()
+    agent_id = data.get("agent_id")
+    api_key = data.get("api_key")
+
+    if not agent_id or not api_key:
+        raise RuntimeError("Enrollment não retornou agent_id/api_key.")
+
+    config["agent_id"] = agent_id
+    config["api_key"] = api_key
+    config["enrolled_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    config.pop("enrollment_token", None)
+
+    save_config(config)
+
+    logging.info("Enrollment concluído. Agent ID: %s", agent_id)
+
+    return config
 
 
 
@@ -185,7 +297,7 @@ def process_command(client: GabrielApiClient, command: dict[str, Any]) -> None:
 
 
 def main() -> int:
-    config = load_config()
+    config = ensure_enrolled(load_config())
 
     client = GabrielApiClient(
         base_url=config["base_url"],
@@ -197,12 +309,12 @@ def main() -> int:
     poll_seconds = int(config.get("poll_seconds", 5))
     command_limit = int(config.get("command_limit", 5))
 
-    logging.info("Agente Gabriel Windows iniciado.")
-    logging.info("Agent ID: %s", config["agent_id"])
-    logging.info("Backend: %s", config["base_url"])
+    logging.info("PrinterBridge Agent Windows iniciado.")
+    logging.info("Agent ID: %s", config.get("agent_id"))
+    logging.info("Backend: %s", config.get("base_url"))
 
     try:
-        client.report_event("agent_started", "Agente Windows MVP iniciado.", "info")
+        client.report_event("agent_started", "PrinterBridge Agent Windows iniciado.", "info")
     except Exception as exc:
         logging.warning("Não foi possível registrar evento inicial: %s", exc)
 

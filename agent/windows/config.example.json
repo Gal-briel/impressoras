@@ -1,8 +1,7 @@
 {
-  "base_url": "https://SEU-DOMINIO/api/v1",
-  "agent_id": "GERADO-PELO-BACKEND",
-  "api_key": "GERADA-PELO-BACKEND",
-  "check_interval_seconds": 30,
-  "command_poll_interval_seconds": 5,
-  "log_level": "INFO"
+  "base_url": "https://SEU-ENDPOINT/api/v1",
+  "enrollment_token": "pbe_enroll_COLE_O_TOKEN_AQUI",
+  "agent_version": "0.4.0",
+  "poll_seconds": 5,
+  "command_limit": 5
 }
