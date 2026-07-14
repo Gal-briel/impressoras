@@ -19,13 +19,14 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # Agent/dev
-    AGENT_API_KEY: str = "dev-agent-api-key"
+    AGENT_API_KEY: str | None = None
 
     # Infra
     REDIS_URL: str
     RABBITMQ_URL: str
 
     # Banco de Dados
+    DATABASE_URL: Optional[str] = None
     POSTGRES_USER: str
     POSTGRES_PASSWORD: str
     POSTGRES_SERVER: Optional[str] = None
@@ -37,11 +38,21 @@ class Settings(BaseSettings):
     @property
     def SQLALCHEMY_DATABASE_URI(self) -> str:
         """
-        Monta a URI do PostgreSQL sem duplicar '/' antes do nome do banco.
+        Retorna a URI assíncrona do PostgreSQL.
 
-        Exemplo correto:
-        postgresql+asyncpg://saas:saas@localhost:5432/saas_platform
+        Prioridade:
+        1. DATABASE_URL, útil em produção/Supabase.
+        2. POSTGRES_* do .env local, útil em desenvolvimento Docker.
         """
+        if self.DATABASE_URL:
+            if self.DATABASE_URL.startswith("postgresql+asyncpg://"):
+                return self.DATABASE_URL
+
+            if self.DATABASE_URL.startswith("postgresql://"):
+                return self.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+            return self.DATABASE_URL
+
         server = self.POSTGRES_SERVER or self.POSTGRES_HOST
 
         if not server:
@@ -71,3 +82,72 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def get_sync_database_url() -> str:
+    """Retorna URL síncrona compatível com psycopg2.
+
+    Prioridade:
+    1. SYNC_DATABASE_URL
+    2. DATABASE_URL convertido de postgresql+asyncpg:// para postgresql://
+    3. settings.SQLALCHEMY_DATABASE_URI convertido
+    """
+    import os
+
+    sync_url = os.getenv("SYNC_DATABASE_URL")
+    if sync_url:
+        return sync_url.replace("postgresql+asyncpg://", "postgresql://")
+
+    database_url = os.getenv("DATABASE_URL")
+    if database_url:
+        return database_url.replace("postgresql+asyncpg://", "postgresql://")
+
+    return str(settings.SQLALCHEMY_DATABASE_URI).replace(
+        "postgresql+asyncpg://",
+        "postgresql://",
+    )
+
+
+
+
+def validate_runtime_security() -> None:
+    """Bloqueia inicialização insegura em produção."""
+    import os
+
+    environment = (
+        os.getenv("ENVIRONMENT")
+        or os.getenv("APP_ENV")
+        or os.getenv("PYTHON_ENV")
+        or "development"
+    ).strip().lower()
+
+    if environment not in {"production", "prod"}:
+        return
+
+    secret_key = str(settings.SECRET_KEY or "").strip()
+    jwt_secret_key = str(getattr(settings, "JWT_SECRET_KEY", "") or "").strip()
+    database_url = str(settings.DATABASE_URL or "").strip()
+
+    weak_values = {
+        "",
+        "change-me",
+        "changeme",
+        "secret",
+        "dev",
+        "development",
+        "troque-esta-chave-em-producao",
+        "super-secret-key",
+        "your-secret-key",
+    }
+
+    if secret_key.lower() in weak_values or len(secret_key) < 32:
+        raise RuntimeError("Configuração insegura: SECRET_KEY forte é obrigatória em produção.")
+
+    if jwt_secret_key and (jwt_secret_key.lower() in weak_values or len(jwt_secret_key) < 32):
+        raise RuntimeError("Configuração insegura: JWT_SECRET_KEY forte é obrigatória em produção.")
+
+    if not database_url:
+        raise RuntimeError("Configuração insegura: DATABASE_URL é obrigatório em produção.")
+
+    if "localhost" in database_url or "127.0.0.1" in database_url:
+        raise RuntimeError("Configuração insegura: DATABASE_URL local não é permitido em produção.")

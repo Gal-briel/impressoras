@@ -32,7 +32,25 @@ function InfoItem({ label, value }: { label: string; value?: string | null }) {
   );
 }
 
+function groupingStatusLabel(agent: Agent) {
+  if (agent.grouping_status === 'manual') {
+    return 'Classificação manual';
+  }
+
+  if (agent.grouping_status === 'auto') {
+    return 'Classificação automática por domínio';
+  }
+
+  if (agent.grouping_status === 'requires_review') {
+    return 'Revisar empresa/grupo';
+  }
+
+  return agent.grouping_status || '-';
+}
+
 export function AgentInfoCard({ agent }: { agent: Agent }) {
+  const requiresReview = agent.grouping_status === 'requires_review';
+
   return (
     <Card className="p-6">
       <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -48,13 +66,40 @@ export function AgentInfoCard({ agent }: { agent: Agent }) {
         <AgentStatusBadge agent={agent} />
       </div>
 
+      {requiresReview ? (
+        <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <p className="text-sm font-bold text-amber-800">
+            Este agente não possui domínio detectado.
+          </p>
+          <p className="mt-1 text-sm text-amber-700">
+            Ele foi colocado automaticamente no grupo “Sem domínio”. Revise e mova para a empresa/grupo correto.
+          </p>
+        </div>
+      ) : null}
+
+      <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          Empresa / Grupo
+        </p>
+
+        <p className="mt-2 text-lg font-bold text-slate-950">
+          {agent.group_name || 'Sem grupo'}
+        </p>
+
+        <div className="mt-3 grid gap-4 md:grid-cols-3">
+          <InfoItem label="Domínio detectado" value={agent.domain_name || 'Sem domínio'} />
+          <InfoItem label="Origem do agrupamento" value={agent.grouping_source} />
+          <InfoItem label="Status do agrupamento" value={groupingStatusLabel(agent)} />
+        </div>
+      </div>
+
       <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
         <InfoItem label="Sistema operacional" value={agent.os_version} />
         <InfoItem label="Versão do agente" value={agent.agent_version} />
         <InfoItem label="IP" value={agent.last_ip || agent.internal_ip || agent.external_ip} />
         <InfoItem label="MAC Address" value={agent.mac_address} />
         <InfoItem label="Último check-in" value={formatDate(agent.last_seen || agent.last_seen_at)} />
-        <InfoItem label="Status bruto" value={agent.status || agent.enrollment_status} />
+        <InfoItem label="Status" value={agent.status || agent.enrollment_status} />
         <InfoItem label="Tenant ID" value={agent.tenant_id} />
         <InfoItem label="Group ID" value={agent.group_id} />
         <InfoItem label="Criado em" value={formatDate(agent.created_at)} />

@@ -4,25 +4,94 @@ import logging
 from typing import Optional
 from uuid import UUID, uuid4
 from datetime import datetime, timezone, timedelta
+from sqlalchemy import select
 
 from app.repositories.base import BaseRepository 
 from app.repositories.command_repository import CommandRepository
 from app.schemas.command import CommandCreate, CommandResponse
 from app.workers.rabbitmq import rabbitmq_client
 from app.infrastructure.database.enums import CommandStatus, EventSeverity
+from app.infrastructure.database.models import Agent
 from app.services.agent_event_service import AgentEventService
 from app.websocket.manager import websocket_manager # NOVO IMPORT
+from app.services.command_policy import validate_and_authorize_command
 
 logger = logging.getLogger(__name__)
+
+
+SENSITIVE_AUDIT_KEYS = {
+    "password",
+    "senha",
+    "secret",
+    "token",
+    "api_key",
+    "apikey",
+    "authorization",
+    "credential",
+    "credentials",
+    "private_key",
+}
+
+
+def _sanitize_audit_value(value, depth: int = 0):
+    if depth > 3:
+        return "[truncated]"
+
+    if isinstance(value, dict):
+        clean = {}
+        for key, item in value.items():
+            key_text = str(key).lower()
+            if any(secret in key_text for secret in SENSITIVE_AUDIT_KEYS):
+                clean[str(key)] = "[redacted]"
+            else:
+                clean[str(key)] = _sanitize_audit_value(item, depth + 1)
+        return clean
+
+    if isinstance(value, list):
+        return [_sanitize_audit_value(item, depth + 1) for item in value[:20]]
+
+    if isinstance(value, str):
+        if len(value) > 500:
+            return value[:500] + "...[truncated]"
+        return value
+
+    return value
+
 
 class CommandService:
     def __init__(self, repository: CommandRepository, audit_repository: BaseRepository):
         self.repository = repository
         self.audit_repository = audit_repository
 
-    async def dispatch_command(self, tenant_id: UUID, agent_id: UUID, user_id: UUID, command_in: CommandCreate) -> CommandResponse:
+    async def dispatch_command(self, tenant_id: UUID, agent_id: UUID, user_id: UUID, command_in: CommandCreate, user_permissions: Optional[list[str]] = None, ip_address: Optional[str] = None) -> CommandResponse:
         correlation_id = str(uuid4()) 
         now = datetime.now(timezone.utc)
+        
+        # Segurança multi-tenant:
+        # nunca cria comando para um agent_id que não pertença ao tenant do usuário.
+        agent_result = await self.repository.session.execute(
+            select(Agent).where(
+                Agent.id == agent_id,
+                Agent.tenant_id == tenant_id,
+            )
+        )
+        agent = agent_result.scalar_one_or_none()
+
+        if not agent:
+            raise PermissionError("Agent not found in current tenant")
+
+        enrollment_status = str(getattr(agent.enrollment_status, "value", agent.enrollment_status)).lower()
+        if agent.revoked_at is not None or enrollment_status == "revoked":
+            raise PermissionError("Agent revoked")
+
+        if enrollment_status != "approved":
+            raise PermissionError("Agent not approved")
+
+        validate_and_authorize_command(
+            command_type=command_in.command_type,
+            payload=command_in.payload or {},
+            permissions=user_permissions or [],
+        )
         
         # Define o tempo limite de validade do comando para fins de expiração na fila
         expiration_time = now + timedelta(seconds=command_in.timeout_seconds)
@@ -46,10 +115,14 @@ class CommandService:
             action="command_created",
             target_type="command",
             target_id=str(command.id),
+            ip_address=ip_address,
             metadata_payload={
+                "agent_id": str(agent_id),
                 "command_type": command.command_type,
                 "correlation_id": correlation_id,
                 "idempotency_key": command.idempotency_key,
+                "timeout_seconds": command.timeout_seconds,
+                "payload": _sanitize_audit_value(command.payload or {}),
             },
         )
         self.audit_repository.session.add(audit_log)

@@ -1,8 +1,7 @@
 {
-  "base_url": "http://localhost:8000/api/v1",
-  "agent_id": "COLE-O-ID-DO-AGENTE-AQUI",
-  "api_key": "dev-agent-api-key",
-  "agent_version": "0.1.0",
+  "base_url": "https://SEU-ENDPOINT/api/v1",
+  "enrollment_token": "pbe_enroll_COLE_O_TOKEN_AQUI",
+  "agent_version": "0.4.0",
   "poll_seconds": 5,
   "command_limit": 5
 }

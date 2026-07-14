@@ -20,6 +20,10 @@ export type Agent = {
   status?: string;
   capabilities?: string[];
   group_id?: string | null;
+  group_name?: string | null;
+  domain_name?: string | null;
+  grouping_source?: string | null;
+  grouping_status?: string | null;
   revoked_at?: string | null;
   created_at?: string;
   updated_at?: string;
@@ -68,3 +72,18 @@ export type AgentEventsResponse = {
   warning?: string;
 };
 
+
+
+export type AgentGroup = {
+  id: string;
+  tenant_id?: string;
+  name: string;
+  description?: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type AgentGroupsResponse = {
+  items: AgentGroup[];
+  total: number;
+};

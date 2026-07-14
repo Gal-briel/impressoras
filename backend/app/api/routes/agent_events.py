@@ -8,7 +8,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
-from app.core.dependencies import CurrentUser, get_current_user, require_agent_auth
+from app.core.dependencies import CurrentUser, require_permissions, require_agent_auth
 from app.infrastructure.database.models import Agent
 
 try:
@@ -132,7 +132,7 @@ async def _get_agent_or_404(
 async def list_agent_events(
     agent_id: UUID,
     limit: int = Query(default=100, ge=1, le=500),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["agents:read"])),
     session: AsyncSession = Depends(get_db_session),
 ):
     if AgentEvent is None:

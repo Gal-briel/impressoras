@@ -6,6 +6,8 @@ from uuid import UUID
 from app.core.redis import redis_client
 from app.domain.enums import AgentStatus
 
+ONLINE_WINDOW_SECONDS = 300
+
 
 class AgentPresenceService:
     """Calcula status do agente com Redis opcional e fallback pelo last_seen."""
@@ -19,12 +21,13 @@ class AgentPresenceService:
             return AgentStatus.UNKNOWN
 
         now = datetime.now(timezone.utc)
+
         if last_seen.tzinfo is None:
             last_seen = last_seen.replace(tzinfo=timezone.utc)
 
         delta_seconds = (now - last_seen).total_seconds()
 
-        if delta_seconds <= 60:
+        if delta_seconds <= ONLINE_WINDOW_SECONDS:
             return AgentStatus.ONLINE
 
         return AgentStatus.OFFLINE

@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -105,15 +105,28 @@ class AgentGroupService:
 
     async def assign_agent_group(self, tenant_id: UUID, agent_id: UUID, group_id: Optional[UUID]) -> AgentResponse:
         agent = await self._get_agent_model(tenant_id, agent_id)
+
         if group_id is not None:
             await self._get_group_model(tenant_id, group_id)
-        agent.group_id = group_id
+            agent.group_id = group_id
+            agent.grouping_source = "manual"
+            agent.grouping_status = "manual"
+        else:
+            agent.group_id = None
+            await self.session.flush()
+            await self.session.execute(
+                text("SELECT sync_agent_grouping(:agent_id)"),
+                {"agent_id": str(agent.id)},
+            )
+
         self.session.add(agent)
         await self.session.commit()
         await self.session.refresh(agent)
 
         result = await self.session.execute(
-            select(Agent).options(selectinload(Agent.tags)).where(Agent.id == agent.id)
+            select(Agent)
+            .options(selectinload(Agent.tags), selectinload(Agent.group))
+            .where(Agent.id == agent.id)
         )
         refreshed_agent = result.scalars().first() or agent
         return await AgentService(BaseRepository(Agent, self.session))._map_to_response(refreshed_agent)

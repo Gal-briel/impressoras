@@ -1,5 +1,5 @@
-import { FormEvent, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { FormEvent, useEffect, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 
 import { Card } from '../../../components/ui/Card';
 import { PageHeader } from '../../../components/ui/PageHeader';
@@ -8,126 +8,64 @@ import {
   useOperationalAlerts,
   useOperationalAlertsSummary,
   useResolveOperationalAlert,
+  useSyncAllOperationalAlerts,
   useSyncOfflineAgentAlerts,
+  useSyncSoftwareChangeAlerts,
 } from '../hooks/useOperationalAlerts';
+import {
+  alertTypeLabel,
+  alertTypeOptions,
+  formatDate,
+  severityBadgeClass,
+  severityLabel,
+  severityOptions,
+  statusBadgeClass,
+  statusLabel,
+  statusOptions,
+} from '../utils/operationalAlertTaxonomy';
 
-function formatDate(value?: string | null) {
-  if (!value) {
-    return '—';
-  }
-
-  try {
-    return new Intl.DateTimeFormat('pt-BR', {
-      dateStyle: 'short',
-      timeStyle: 'short',
-    }).format(new Date(value));
-  } catch {
+function normalizeOptionValue(
+  value: string | null,
+  options: Array<{ value: string; label: string }>,
+  fallback: string,
+) {
+  if (value && options.some((option) => option.value === value)) {
     return value;
   }
+
+  return fallback;
 }
-
-function severityLabel(severity: string) {
-  if (severity === 'critical') {
-    return 'Crítico';
-  }
-
-  if (severity === 'warning') {
-    return 'Atenção';
-  }
-
-  return 'Info';
-}
-
-function severityBadgeClass(severity: string) {
-  if (severity === 'critical') {
-    return 'border-red-200 bg-red-50 text-red-700';
-  }
-
-  if (severity === 'warning') {
-    return 'border-amber-200 bg-amber-50 text-amber-700';
-  }
-
-  return 'border-blue-200 bg-blue-50 text-blue-700';
-}
-
-function statusLabel(status: string) {
-  if (status === 'active') {
-    return 'Ativo';
-  }
-
-  if (status === 'resolved') {
-    return 'Resolvido';
-  }
-
-  if (status === 'ignored') {
-    return 'Ignorado';
-  }
-
-  return status;
-}
-
-function statusBadgeClass(status: string) {
-  if (status === 'active') {
-    return 'border-red-200 bg-red-50 text-red-700';
-  }
-
-  if (status === 'resolved') {
-    return 'border-emerald-200 bg-emerald-50 text-emerald-700';
-  }
-
-  return 'border-slate-200 bg-slate-50 text-slate-700';
-}
-
-function alertTypeLabel(alertType: string) {
-  const labels: Record<string, string> = {
-    command_failed: 'Falha em comando',
-    manual_test: 'Teste manual',
-    agent_offline: 'Agente offline',
-    security_alert: 'Segurança',
-    software_change: 'Mudança de software',
-  };
-
-  return labels[alertType] || alertType;
-}
-
-const statusOptions = [
-  { value: 'active', label: 'Ativos' },
-  { value: 'resolved', label: 'Resolvidos' },
-  { value: 'ignored', label: 'Ignorados' },
-  { value: 'all', label: 'Todos' },
-];
-
-const severityOptions = [
-  { value: 'all', label: 'Todas' },
-  { value: 'critical', label: 'Crítico' },
-  { value: 'warning', label: 'Atenção' },
-  { value: 'info', label: 'Info' },
-];
-
-const alertTypeOptions = [
-  { value: 'all', label: 'Todos' },
-  { value: 'command_failed', label: 'Falha em comando' },
-  { value: 'agent_offline', label: 'Agente offline' },
-  { value: 'security_alert', label: 'Segurança' },
-  { value: 'software_change', label: 'Mudança de software' },
-  { value: 'manual_test', label: 'Teste manual' },
-];
 
 export function OperationalAlertsPage() {
-  const [statusFilter, setStatusFilter] = useState('active');
-  const [severity, setSeverity] = useState('all');
-  const [alertType, setAlertType] = useState('all');
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const agentIdFilter = searchParams.get('agent_id') || undefined;
+  const statusUrlFilter = normalizeOptionValue(searchParams.get('status'), statusOptions, 'active');
+  const severityUrlFilter = normalizeOptionValue(searchParams.get('severity'), severityOptions, 'all');
+  const alertTypeUrlFilter = normalizeOptionValue(searchParams.get('alert_type'), alertTypeOptions, 'all');
+
+  const [statusFilter, setStatusFilter] = useState(statusUrlFilter);
+  const [severity, setSeverity] = useState(severityUrlFilter);
+  const [alertType, setAlertType] = useState(alertTypeUrlFilter);
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [offset, setOffset] = useState(0);
 
   const limit = 20;
 
+  useEffect(() => {
+    setStatusFilter(statusUrlFilter);
+    setSeverity(severityUrlFilter);
+    setAlertType(alertTypeUrlFilter);
+    setOffset(0);
+  }, [agentIdFilter, statusUrlFilter, severityUrlFilter, alertTypeUrlFilter]);
+
   const summaryQuery = useOperationalAlertsSummary();
   const alertsQuery = useOperationalAlerts({
     status: statusFilter,
     severity,
     alert_type: alertType,
+    agent_id: agentIdFilter,
     search,
     limit,
     offset,
@@ -135,7 +73,9 @@ export function OperationalAlertsPage() {
 
   const resolveMutation = useResolveOperationalAlert();
   const ignoreMutation = useIgnoreOperationalAlert();
+  const syncAllMutation = useSyncAllOperationalAlerts();
   const syncOfflineMutation = useSyncOfflineAgentAlerts();
+  const syncSoftwareMutation = useSyncSoftwareChangeAlerts();
 
   const summary = summaryQuery.data?.summary;
   const alerts = alertsQuery.data?.items || [];
@@ -143,7 +83,24 @@ export function OperationalAlertsPage() {
 
   const isLoading = summaryQuery.isLoading || alertsQuery.isLoading;
   const hasError = summaryQuery.isError || alertsQuery.isError;
-  const isMutating = resolveMutation.isPending || ignoreMutation.isPending || syncOfflineMutation.isPending;
+  const isMutating =
+    resolveMutation.isPending ||
+    ignoreMutation.isPending ||
+    syncAllMutation.isPending ||
+    syncOfflineMutation.isPending ||
+    syncSoftwareMutation.isPending;
+
+  function updateUrlFilter(key: string, value: string, defaultValue: string) {
+    const nextParams = new URLSearchParams(searchParams);
+
+    if (value === defaultValue) {
+      nextParams.delete(key);
+    } else {
+      nextParams.set(key, value);
+    }
+
+    setSearchParams(nextParams, { replace: true });
+  }
 
   function handleSearch(event: FormEvent) {
     event.preventDefault();
@@ -154,16 +111,33 @@ export function OperationalAlertsPage() {
   function handleStatus(value: string) {
     setStatusFilter(value);
     setOffset(0);
+    updateUrlFilter('status', value, 'active');
   }
 
   function handleSeverity(value: string) {
     setSeverity(value);
     setOffset(0);
+    updateUrlFilter('severity', value, 'all');
   }
 
   function handleAlertType(value: string) {
     setAlertType(value);
     setOffset(0);
+    updateUrlFilter('alert_type', value, 'all');
+  }
+
+  function clearAgentFilter() {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('agent_id');
+    setSearchParams(nextParams, { replace: true });
+  }
+
+  function clearAllUrlFilters() {
+    setStatusFilter('active');
+    setSeverity('all');
+    setAlertType('all');
+    setOffset(0);
+    setSearchParams(new URLSearchParams(), { replace: true });
   }
 
   function refresh() {
@@ -184,6 +158,26 @@ export function OperationalAlertsPage() {
         },
       },
     );
+  }
+
+  function syncAllAlerts() {
+    syncAllMutation.mutate(15, {
+      onSuccess: (result) => {
+        window.alert(
+          `Sincronização geral concluída. Abertos/atualizados: ${result.totals.opened_or_refreshed}. Resolvidos: ${result.totals.resolved}.`,
+        );
+      },
+    });
+  }
+
+  function syncSoftwareChanges() {
+    syncSoftwareMutation.mutate(undefined, {
+      onSuccess: (result) => {
+        window.alert(
+          `Sincronização de software concluída. Abertos/atualizados: ${result.opened_or_refreshed}. Resolvidos: ${result.resolved}.`,
+        );
+      },
+    });
   }
 
   function resolveAlert(alertId: string) {
@@ -226,6 +220,24 @@ export function OperationalAlertsPage() {
               className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 shadow-sm hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {syncOfflineMutation.isPending ? 'Sincronizando...' : 'Sincronizar offline'}
+            </button>
+
+            <button
+              type="button"
+              onClick={syncAllAlerts}
+              disabled={syncAllMutation.isPending}
+              className="rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800 shadow-sm hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {syncAllMutation.isPending ? 'Sincronizando...' : 'Sincronizar tudo'}
+            </button>
+
+            <button
+              type="button"
+              onClick={syncSoftwareChanges}
+              disabled={syncSoftwareMutation.isPending}
+              className="rounded-lg border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-800 shadow-sm hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {syncSoftwareMutation.isPending ? 'Sincronizando...' : 'Sincronizar software'}
             </button>
 
             <button
@@ -280,6 +292,71 @@ export function OperationalAlertsPage() {
           <p className="mt-2 text-3xl font-bold text-slate-950">{summary?.agents_with_active_alerts ?? 0}</p>
         </Card>
       </div>
+
+      {agentIdFilter || statusFilter !== 'active' || severity !== 'all' || alertType !== 'all' ? (
+        <Card className="mb-6 border-blue-200 bg-blue-50 p-5">
+          <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
+            <div>
+              <p className="text-sm font-bold text-blue-800">
+                Filtros ativos na Central de Alertas
+              </p>
+
+              {agentIdFilter ? (
+                <p className="mt-1 break-all text-sm text-blue-700">
+                  Agente: {agentIdFilter}
+                </p>
+              ) : null}
+
+              {statusFilter !== 'active' ? (
+                <p className="mt-1 text-sm text-blue-700">
+                  Status: {statusLabel(statusFilter)}
+                </p>
+              ) : null}
+
+              {severity !== 'all' ? (
+                <p className="mt-1 text-sm text-blue-700">
+                  Severidade: {severityLabel(severity)}
+                </p>
+              ) : null}
+
+              {alertType !== 'all' ? (
+                <p className="mt-1 text-sm text-blue-700">
+                  Tipo: {alertTypeLabel(alertType)}
+                </p>
+              ) : null}
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {agentIdFilter ? (
+                <Link
+                  to={`/agents/${agentIdFilter}`}
+                  className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 shadow-sm hover:bg-blue-50"
+                >
+                  Ver agente
+                </Link>
+              ) : null}
+
+              {agentIdFilter ? (
+                <button
+                  type="button"
+                  onClick={clearAgentFilter}
+                  className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 shadow-sm hover:bg-blue-50"
+                >
+                  Limpar agente
+                </button>
+              ) : null}
+
+              <button
+                type="button"
+                onClick={clearAllUrlFilters}
+                className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 shadow-sm hover:bg-blue-50"
+              >
+                Limpar filtros
+              </button>
+            </div>
+          </div>
+        </Card>
+      ) : null}
 
       <Card className="mb-6 p-4">
         <form onSubmit={handleSearch} className="grid gap-3 xl:grid-cols-[160px_160px_220px_1fr_auto]">

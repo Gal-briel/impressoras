@@ -4,10 +4,13 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import get_db_session
+from app.core.dependencies import get_db_session, require_permissions
 from app.infrastructure.database.models import Agent, Command
 
-router = APIRouter(tags=["dashboard"])
+router = APIRouter(
+    tags=["dashboard"],
+    dependencies=[Depends(require_permissions(["dashboard:read"]))],
+)
 
 
 def _value(value) -> str:
@@ -31,7 +34,7 @@ async def dashboard_summary(
     session: AsyncSession = Depends(get_db_session),
 ):
     now = datetime.now(timezone.utc)
-    online_cutoff = now - timedelta(minutes=2)
+    online_cutoff = now - timedelta(minutes=5)
 
     agents_result = await session.execute(select(Agent))
     agents = list(agents_result.scalars().all())

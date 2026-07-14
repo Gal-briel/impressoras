@@ -5,7 +5,9 @@ import {
   getOperationalAlertsSummary,
   ignoreOperationalAlert,
   resolveOperationalAlert,
+  syncAllOperationalAlerts,
   syncOfflineAgentAlerts,
+  syncSoftwareChangeAlerts,
 } from '../api/operationalAlertsApi';
 
 export function useOperationalAlertsSummary() {
@@ -86,6 +88,18 @@ export function useIgnoreOperationalAlert() {
 }
 
 
+
+export function useSyncAllOperationalAlerts() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: syncAllOperationalAlerts,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['operational-alerts'] });
+    },
+  });
+}
+
 export function useSyncOfflineAgentAlerts() {
   const queryClient = useQueryClient();
 
@@ -97,3 +111,15 @@ export function useSyncOfflineAgentAlerts() {
     },
   });
 }
+
+export function useSyncSoftwareChangeAlerts() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: syncSoftwareChangeAlerts,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['operational-alerts'] });
+    },
+  });
+}
+

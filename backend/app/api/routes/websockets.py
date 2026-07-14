@@ -59,6 +59,11 @@ async def agent_websocket_endpoint(
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
+    enrollment_status = str(getattr(agent.enrollment_status, "value", agent.enrollment_status)).lower()
+    if enrollment_status != "approved":
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
     authorization = websocket.headers.get("authorization", "")
     header_agent_id = websocket.headers.get("x-agent-id", "")
     if header_agent_id and header_agent_id != agent_id:
@@ -72,11 +77,8 @@ async def agent_websocket_endpoint(
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
     if not verify_api_key(plain_api_key, agent.api_key_hash):
-        if plain_api_key == agent.api_key_hash:
-            await agent_service.upgrade_api_key_hash(agent_uuid, plain_api_key)
-        else:
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-            return
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
 
     await websocket_manager.connect(agent_id, websocket)
     try:

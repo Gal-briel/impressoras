@@ -32,12 +32,10 @@ class AuditMiddleware(BaseHTTPMiddleware):
             action = "user_logout"
             target_type = "auth"
             target_id = "system"
+        # Comandos remotos são auditados diretamente no CommandService,
+        # onde temos command_id, correlation_id, payload seguro e IP real.
         elif "/commands" in path and request.method == "POST":
-            action = "command_created"
-            target_type = "agent"
-            match = re.search(r"/agents/([^/]+)/commands", path)
-            if match:
-                target_id = match.group(1)
+            return response
         elif "/agents/" in path and request.method in ["PATCH", "PUT"]:
             action = "agent_altered"
             target_type = "agent"
@@ -63,7 +61,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
             token = auth_header.split(" ")[1]
             try:
                 # Decode passivo (confiando que a rota já validou a assinatura se necessário)
-                payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM], options={"verify_signature": False})
+                payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
                 return payload.get("sub"), payload.get("tenant_id")
             except Exception:
                 pass

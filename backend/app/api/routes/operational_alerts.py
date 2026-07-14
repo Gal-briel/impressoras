@@ -5,11 +5,32 @@ from typing import Any
 from uuid import UUID
 
 import psycopg2
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from psycopg2.extras import RealDictCursor
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from psycopg2.extras import Json, RealDictCursor
 from pydantic import BaseModel
 
-from app.core.dependencies import CurrentUser, get_current_user
+from app.core.dependencies import CurrentUser, get_current_user, require_permissions
+from app.services.audit_service import get_request_ip, log_audit_event_sync
+
+
+def get_sync_database_url() -> str:
+    database_url = (
+        os.getenv("SYNC_DATABASE_URL")
+        or os.getenv("DATABASE_URL")
+        or ""
+    )
+
+    if database_url.startswith("postgresql+asyncpg://"):
+        database_url = database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+
+    if not database_url:
+        raise RuntimeError("Database URL not configured. Set SYNC_DATABASE_URL or DATABASE_URL.")
+
+    return database_url
+
+
+def get_connection():
+    return psycopg2.connect(get_sync_database_url())
 
 
 router = APIRouter(
@@ -17,18 +38,10 @@ router = APIRouter(
     tags=["Operational alerts"],
 )
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://saas:saas@localhost:5432/saas_platform",
-)
-
 
 class AlertActionPayload(BaseModel):
     note: str | None = None
 
-
-def get_connection():
-    return psycopg2.connect(DATABASE_URL)
 
 
 def serialize_value(value: Any) -> Any:
@@ -116,7 +129,7 @@ def get_alert_or_404(cur, tenant_id: str, alert_id: str) -> dict[str, Any]:
 
 @router.get("/summary")
 def get_operational_alerts_summary(
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["operational-alerts:read"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
 
@@ -209,7 +222,7 @@ def list_operational_alerts(
     search: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["operational-alerts:read"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
 
@@ -331,7 +344,7 @@ def list_operational_alerts(
 @router.get("/{alert_id}")
 def get_operational_alert(
     alert_id: UUID,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["operational-alerts:read"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
 
@@ -345,8 +358,9 @@ def get_operational_alert(
 @router.post("/{alert_id}/resolve")
 def resolve_operational_alert(
     alert_id: UUID,
+    request: Request,
     payload: AlertActionPayload | None = None,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["operational-alerts:write"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
     note = payload.note if payload else None
@@ -391,14 +405,32 @@ def resolve_operational_alert(
             row = cur.fetchone()
             conn.commit()
 
-    return serialize_row(dict(row))
+    result_payload = serialize_row(dict(row))
+
+    log_audit_event_sync(
+        tenant_id=tenant_id,
+        user_id=current_user.id,
+        action="operational_alert_resolved",
+        target_type="operational_alert",
+        target_id=alert_id,
+        ip_address=get_request_ip(request),
+        metadata_payload={
+            "note": note,
+            "alert_type": result_payload.get("alert_type"),
+            "severity": result_payload.get("severity"),
+            "status": result_payload.get("status"),
+        },
+    )
+
+    return result_payload
 
 
 @router.post("/{alert_id}/ignore")
 def ignore_operational_alert(
     alert_id: UUID,
+    request: Request,
     payload: AlertActionPayload | None = None,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["operational-alerts:write"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
     note = payload.note if payload else None
@@ -443,13 +475,31 @@ def ignore_operational_alert(
             row = cur.fetchone()
             conn.commit()
 
-    return serialize_row(dict(row))
+    result_payload = serialize_row(dict(row))
+
+    log_audit_event_sync(
+        tenant_id=tenant_id,
+        user_id=current_user.id,
+        action="operational_alert_ignored",
+        target_type="operational_alert",
+        target_id=alert_id,
+        ip_address=get_request_ip(request),
+        metadata_payload={
+            "note": note,
+            "alert_type": result_payload.get("alert_type"),
+            "severity": result_payload.get("severity"),
+            "status": result_payload.get("status"),
+        },
+    )
+
+    return result_payload
 
 
 @router.post("/sync/offline-agents")
 def sync_offline_agent_alerts(
+    request: Request,
     offline_after_minutes: int = Query(default=15, ge=1, le=1440),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["operational-alerts:write"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
 
@@ -466,12 +516,25 @@ def sync_offline_agent_alerts(
             row = cur.fetchone()
             conn.commit()
 
-    return serialize_row(dict(row))
+    result_payload = serialize_row(dict(row))
+
+    log_audit_event_sync(
+        tenant_id=tenant_id,
+        user_id=current_user.id,
+        action="operational_alerts_synced_offline_agents",
+        target_type="operational_alert",
+        target_id="sync_offline_agents",
+        ip_address=get_request_ip(request),
+        metadata_payload=result_payload,
+    )
+
+    return result_payload
 
 
 @router.post("/sync/security-alerts")
 def sync_security_operational_alerts(
-    current_user: CurrentUser = Depends(get_current_user),
+    request: Request,
+    current_user: CurrentUser = Depends(require_permissions(["operational-alerts:write"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
 
@@ -488,4 +551,126 @@ def sync_security_operational_alerts(
             row = cur.fetchone()
             conn.commit()
 
-    return serialize_row(dict(row))
+    result_payload = serialize_row(dict(row))
+
+    log_audit_event_sync(
+        tenant_id=tenant_id,
+        user_id=current_user.id,
+        action="operational_alerts_synced_security",
+        target_type="operational_alert",
+        target_id="sync_security_alerts",
+        ip_address=get_request_ip(request),
+        metadata_payload=result_payload,
+    )
+
+    return result_payload
+
+
+@router.post("/sync/software-changes")
+def sync_software_change_operational_alerts(
+    request: Request,
+    current_user: CurrentUser = Depends(require_permissions(["operational-alerts:write"])),
+):
+    tenant_id = get_current_tenant_id(current_user)
+
+    with get_connection() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT *
+                FROM sync_operational_alerts_from_active_software_changes(%s);
+                """,
+                (tenant_id,),
+            )
+
+            row = cur.fetchone()
+            conn.commit()
+
+    result_payload = serialize_row(dict(row))
+
+    log_audit_event_sync(
+        tenant_id=tenant_id,
+        user_id=current_user.id,
+        action="operational_alerts_synced_software_changes",
+        target_type="operational_alert",
+        target_id="sync_software_changes",
+        ip_address=get_request_ip(request),
+        metadata_payload=result_payload,
+    )
+
+    return result_payload
+
+
+@router.post("/sync/all")
+def sync_all_operational_alerts(
+    request: Request,
+    offline_after_minutes: int = 15,
+    current_user: CurrentUser = Depends(require_permissions(["operational-alerts:write"])),
+):
+    tenant_id = get_current_tenant_id(current_user)
+
+    with get_connection() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT *
+                FROM sync_operational_alerts_for_offline_agents(%s, %s);
+                """,
+                (tenant_id, offline_after_minutes),
+            )
+            offline_result = dict(cur.fetchone())
+
+            cur.execute(
+                """
+                SELECT *
+                FROM sync_operational_alerts_from_active_security_alerts(%s);
+                """,
+                (tenant_id,),
+            )
+            security_result = dict(cur.fetchone())
+
+            cur.execute(
+                """
+                SELECT *
+                FROM sync_operational_alerts_from_active_software_changes(%s);
+                """,
+                (tenant_id,),
+            )
+            software_result = dict(cur.fetchone())
+
+            conn.commit()
+
+    total_opened_or_refreshed = (
+        int(offline_result.get("opened_or_refreshed") or 0)
+        + int(security_result.get("opened_or_refreshed") or 0)
+        + int(software_result.get("opened_or_refreshed") or 0)
+    )
+
+    total_resolved = (
+        int(offline_result.get("resolved") or 0)
+        + int(security_result.get("resolved") or 0)
+        + int(software_result.get("resolved") or 0)
+    )
+
+    result_payload = {
+        "offline_agents": serialize_row(offline_result),
+        "security_alerts": serialize_row(security_result),
+        "software_changes": serialize_row(software_result),
+        "totals": {
+            "opened_or_refreshed": total_opened_or_refreshed,
+            "resolved": total_resolved,
+        },
+    }
+
+    log_audit_event_sync(
+        tenant_id=tenant_id,
+        user_id=current_user.id,
+        action="operational_alerts_synced_all",
+        target_type="operational_alert",
+        target_id="sync_all",
+        ip_address=get_request_ip(request),
+        metadata_payload=result_payload,
+    )
+
+    return result_payload
+

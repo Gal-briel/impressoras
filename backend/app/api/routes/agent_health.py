@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
-from app.core.dependencies import CurrentUser, get_current_user
+from app.core.dependencies import CurrentUser, require_permissions
 from app.infrastructure.database.models import Agent, Command
 
 try:
@@ -103,7 +103,7 @@ def _event_to_summary(event):
 async def get_agent_health(
     agent_id: UUID,
     recent_limit: int = Query(default=10, ge=1, le=50),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_permissions(["agents:read"])),
     session: AsyncSession = Depends(get_db_session),
 ):
     tenant_id = UUID(current_user.tenant_id)

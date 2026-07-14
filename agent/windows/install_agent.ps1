@@ -3,18 +3,15 @@ param(
     [string]$BaseUrl,
 
     [Parameter(Mandatory = $true)]
-    [string]$AgentId,
-
-    [Parameter(Mandatory = $true)]
-    [string]$ApiKey,
+    [string]$EnrollmentToken,
 
     [string]$InstallDir = "C:\agents\windows",
 
-    [string]$TaskName = "Gabriel Windows Agent",
+    [string]$TaskName = "PrinterBridge Windows Agent",
 
     [int]$PollSeconds = 5,
 
-    [string]$AgentVersion = "0.1.5"
+    [string]$AgentVersion = "0.4.0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -90,7 +87,8 @@ function Copy-AgentFiles {
     $requiredFiles = @(
         "main.py",
         "api_client.py",
-        "command_runner.py"
+        "command_runner.py",
+        "printer_inventory.py"
     )
 
     foreach ($file in $requiredFiles) {
@@ -101,8 +99,8 @@ function Copy-AgentFiles {
         }
     }
 
-    foreach ($file in $requiredFiles) {
-        Copy-Item -Path (Join-Path $SourceDir $file) -Destination (Join-Path $TargetDir $file) -Force
+    Get-ChildItem -Path $SourceDir -Filter "*.py" -File | ForEach-Object {
+        Copy-Item -Path $_.FullName -Destination (Join-Path $TargetDir $_.Name) -Force
     }
 
     $optionalFiles = @(
@@ -118,22 +116,25 @@ function Copy-AgentFiles {
     }
 }
 
+
 function Write-AgentConfig {
     param(
         [string]$TargetDir,
         [string]$BaseUrl,
-        [string]$AgentId,
-        [string]$ApiKey,
+        [string]$EnrollmentToken,
         [int]$PollSeconds,
         [string]$AgentVersion
     )
 
     $normalizedBaseUrl = $BaseUrl.TrimEnd("/")
 
+    if (-not $normalizedBaseUrl.EndsWith("/api/v1")) {
+        $normalizedBaseUrl = "$normalizedBaseUrl/api/v1"
+    }
+
     $config = [ordered]@{
         base_url = $normalizedBaseUrl
-        agent_id = $AgentId
-        api_key = $ApiKey
+        enrollment_token = $EnrollmentToken
         agent_version = $AgentVersion
         poll_seconds = $PollSeconds
         command_limit = 5
@@ -145,6 +146,7 @@ function Write-AgentConfig {
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     [System.IO.File]::WriteAllText($configPath, $jsonText, $utf8NoBom)
 }
+
 
 function Write-TaskLauncher {
     param([string]$TargetDir)
@@ -255,28 +257,28 @@ function Register-AgentTask {
 
 function Test-AgentApi {
     param(
-        [string]$BaseUrl,
-        [string]$AgentId,
-        [string]$ApiKey
+        [string]$BaseUrl
     )
 
     $normalizedBaseUrl = $BaseUrl.TrimEnd("/")
-    $url = "$normalizedBaseUrl/agent/commands/pending"
 
-    $headers = @{
-        "Authorization" = "ApiKey $ApiKey"
-        "x-agent-id" = $AgentId
+    if (-not $normalizedBaseUrl.EndsWith("/api/v1")) {
+        $normalizedBaseUrl = "$normalizedBaseUrl/api/v1"
     }
 
+    $healthUrl = "$normalizedBaseUrl/health"
+
     try {
-        Invoke-RestMethod -Method GET -Uri $url -Headers $headers -TimeoutSec 20 | Out-Null
+        Invoke-RestMethod -Method Get -Uri $healthUrl -TimeoutSec 15 | Out-Null
+        Write-Ok "API acessível em $healthUrl"
         return $true
     } catch {
-        Write-Warn "Falha no teste de API: $($_.Exception.Message)"
-        Write-Warn "Isso pode acontecer se a URL do Codespace mudou, se a porta 8000 não está pública ou se a API está offline."
+        Write-Warn "Não foi possível validar o /health agora: $($_.Exception.Message)"
+        Write-Warn "A instalação continuará. O agente tentará o enrollment ao iniciar."
         return $false
     }
 }
+
 
 try {
     Assert-Admin
@@ -300,8 +302,7 @@ try {
     Write-AgentConfig `
         -TargetDir $InstallDir `
         -BaseUrl $BaseUrl `
-        -AgentId $AgentId `
-        -ApiKey $ApiKey `
+        -EnrollmentToken $EnrollmentToken `
         -PollSeconds $PollSeconds `
         -AgentVersion $AgentVersion
     Write-Ok "Configuração gravada"
@@ -323,7 +324,7 @@ try {
     Write-Ok "Tarefa registrada: $TaskName"
 
     Write-Step "Testando comunicação com API"
-    $apiOk = Test-AgentApi -BaseUrl $BaseUrl -AgentId $AgentId -ApiKey $ApiKey
+    $apiOk = Test-AgentApi -BaseUrl $BaseUrl
 
     if ($apiOk) {
         Write-Ok "API respondeu corretamente"

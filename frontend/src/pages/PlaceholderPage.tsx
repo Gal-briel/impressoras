@@ -11,7 +11,7 @@ export function PlaceholderPage({ title }: PlaceholderPageProps) {
     <section>
       <PageHeader
         title={title}
-        description="Estrutura preparada para implementação do módulo nas próximas sprints."
+        description="Estrutura preparada para implementação do módulo."
       />
 
       <Card className="p-8">

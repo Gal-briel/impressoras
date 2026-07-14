@@ -23,8 +23,11 @@ class CommandType(str, Enum):
     RESTART_SPOOLER = "restart_spooler"
     CLEAR_PRINT_QUEUE = "clear_print_queue"
     COLLECT_INVENTORY = "collect_inventory"
+    DISCOVER_NETWORK_PRINTERS = "discover_network_printers"
     LIST_PRINTERS = "list_printers"
     INSTALL_PRINTER = "install_printer"
+    INSTALL_NETWORK_PRINTER = "install_network_printer"
+    LIST_PRINTER_DRIVERS = "list_printer_drivers"
     RESTART_SERVICE = "restart_service"
     RUN_SCRIPT_APPROVED = "run_script_approved"
 

@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import selectinload
 
 from app.api.schemas.agent_schemas import AgentCheckInRequest, AgentListResponse, AgentResponse, AgentTagResponse
@@ -24,6 +24,12 @@ class AgentService:
     @staticmethod
     def is_revoked(agent: Agent) -> bool:
         return bool(agent.revoked_at) or agent.enrollment_status == EnrollmentStatus.REVOKED
+
+    async def _sync_grouping_for_agent(self, agent_id: UUID) -> None:
+        await self.repository.session.execute(
+            text("SELECT sync_agent_grouping(:agent_id)"),
+            {"agent_id": str(agent_id)},
+        )
 
     async def list_agents(
         self,
@@ -56,7 +62,7 @@ class AgentService:
 
         result = await self.repository.session.execute(
             select(Agent)
-            .options(selectinload(Agent.tags))
+            .options(selectinload(Agent.tags), selectinload(Agent.group))
             .where(*filters)
             .order_by(Agent.hostname.asc())
             .offset(offset)
@@ -90,11 +96,12 @@ class AgentService:
         }
 
         await self.repository.update(agent, update_data)
+        await self._sync_grouping_for_agent(agent.id)
         await self.repository.session.commit()
 
         await redis_client.safe_setex(
             name=f"agent:presence:{str(agent_id)}",
-            time=60,
+            time=300,
             value="1",
         )
 
@@ -105,11 +112,12 @@ class AgentService:
         agent = await self.repository.get(agent_id)
         if agent and not self.is_revoked(agent):
             await self.repository.update(agent, {"last_seen": now})
+            await self._sync_grouping_for_agent(agent.id)
             await self.repository.session.commit()
 
             await redis_client.safe_setex(
                 name=f"agent:presence:{str(agent_id)}",
-                time=60,
+                time=300,
                 value="1",
             )
 
@@ -136,6 +144,10 @@ class AgentService:
             id=agent.id,
             tenant_id=agent.tenant_id,
             group_id=agent.group_id,
+            group_name=getattr(getattr(agent, "group", None), "name", None),
+            domain_name=getattr(agent, "domain_name", None),
+            grouping_source=getattr(agent, "grouping_source", None),
+            grouping_status=getattr(agent, "grouping_status", None),
             hostname=agent.hostname,
             mac_address=agent.mac_address,
             os_version=agent.os_version,
@@ -154,7 +166,7 @@ class AgentService:
 
     async def get_agent(self, agent_id: UUID) -> Optional[AgentResponse]:
         result = await self.repository.session.execute(
-            select(Agent).options(selectinload(Agent.tags)).where(Agent.id == agent_id)
+            select(Agent).options(selectinload(Agent.tags), selectinload(Agent.group)).where(Agent.id == agent_id)
         )
         agent = result.scalars().first()
         if not agent:

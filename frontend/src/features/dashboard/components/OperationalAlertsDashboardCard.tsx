@@ -4,57 +4,12 @@ import {
   useOperationalAlerts,
   useOperationalAlertsSummary,
 } from '../../operationalAlerts/hooks/useOperationalAlerts';
-
-function formatDate(value?: string | null) {
-  if (!value) {
-    return '—';
-  }
-
-  try {
-    return new Intl.DateTimeFormat('pt-BR', {
-      dateStyle: 'short',
-      timeStyle: 'short',
-    }).format(new Date(value));
-  } catch {
-    return value;
-  }
-}
-
-function severityLabel(severity: string) {
-  if (severity === 'critical') {
-    return 'Crítico';
-  }
-
-  if (severity === 'warning') {
-    return 'Atenção';
-  }
-
-  return 'Info';
-}
-
-function severityBadgeClass(severity: string) {
-  if (severity === 'critical') {
-    return 'border-red-200 bg-red-50 text-red-700';
-  }
-
-  if (severity === 'warning') {
-    return 'border-amber-200 bg-amber-50 text-amber-700';
-  }
-
-  return 'border-blue-200 bg-blue-50 text-blue-700';
-}
-
-function alertTypeLabel(alertType: string) {
-  const labels: Record<string, string> = {
-    command_failed: 'Falha em comando',
-    manual_test: 'Teste manual',
-    agent_offline: 'Agente offline',
-    security_alert: 'Segurança',
-    software_change: 'Mudança de software',
-  };
-
-  return labels[alertType] || alertType;
-}
+import {
+  alertTypeLabel,
+  formatDate,
+  severityBadgeClass,
+  severityLabel,
+} from '../../operationalAlerts/utils/operationalAlertTaxonomy';
 
 export function OperationalAlertsDashboardCard() {
   const summaryQuery = useOperationalAlertsSummary();

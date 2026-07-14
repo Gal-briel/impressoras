@@ -13,6 +13,15 @@ export type Printer = {
   tenant_id?: string;
   agent_id?: string;
   agent_hostname?: string | null;
+  agent_ip?: string | null;
+  agent_network?: string | null;
+  network?: string | null;
+  agent_group_id?: string | null;
+  agent_group_name?: string | null;
+  agent_domain_name?: string | null;
+  agent_grouping_source?: string | null;
+  agent_grouping_status?: string | null;
+  company_group?: string | null;
   name?: string;
   printer_name?: string;
   driver_name?: string | null;

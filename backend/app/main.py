@@ -10,19 +10,20 @@ from app.api.routes import software_inventory_changes
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import (
+    agent_runtime as agent_runtime_routes,
     agent_events,
     agent_groups,
-    agent_health,
     agent_inventory,
-    agent_runtime,
     agent_tags,
     agents,
     auth,
     commands,
     printers,
+    settings as settings_routes,
     websockets,
 )
-from app.core.config import settings
+from app.core.config import settings, validate_runtime_security
+from app.api.routes import agent_enrollment as agent_enrollment_routes
 from app.core.middleware import AuditMiddleware
 from app.core.openapi import configure_openapi
 from app.core.redis import redis_client
@@ -31,6 +32,10 @@ from app.workers.rabbitmq import rabbitmq_client
 from app.workers.timeout_monitor import monitor_command_timeouts
 from app.api.routes import dashboard
 from app.api.routes import operational_alerts
+from app.api.routes import notifications
+from app.api.routes import reports
+from app.api.routes import audit
+from app.api.routes import agent_health as agent_health_routes
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +72,8 @@ async def lifespan(app: FastAPI):
                 await rabbitmq_client.connection.close()
 
 
+validate_runtime_security()
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
@@ -86,24 +93,28 @@ app.add_middleware(
 
 # Rotas web/autenticadas
 app.include_router(auth.router, prefix=settings.API_V1_STR)
+app.include_router(agent_runtime_routes.router, prefix=settings.API_V1_STR)
 app.include_router(agents.router, prefix=settings.API_V1_STR)
 app.include_router(commands.router, prefix=settings.API_V1_STR)
 app.include_router(dashboard.router, prefix=settings.API_V1_STR)
 app.include_router(printers.router, prefix=settings.API_V1_STR)
+app.include_router(settings_routes.router, prefix=settings.API_V1_STR)
 app.include_router(agent_tags.router, prefix=settings.API_V1_STR)
 app.include_router(agent_groups.router, prefix=settings.API_V1_STR)
-app.include_router(agent_health.router, prefix=settings.API_V1_STR)
 app.include_router(agent_inventory.router, prefix=settings.API_V1_STR)
+app.include_router(agent_health_routes.router, prefix=settings.API_V1_STR)
 app.include_router(websockets.router, prefix=settings.API_V1_STR)
 
 # Rotas usadas diretamente pelo agente Windows 0.1.x
-app.include_router(agent_runtime.router, prefix=settings.API_V1_STR)
 app.include_router(agent_events.router, prefix=settings.API_V1_STR)
 
 app.include_router(persisted_inventory.router, prefix="/api/v1")
 app.include_router(security_alerts.router, prefix="/api/v1")
 app.include_router(software_inventory_changes.router, prefix="/api/v1")
 app.include_router(operational_alerts.router, prefix="/api/v1")
+app.include_router(notifications.router, prefix="/api/v1")
+app.include_router(reports.router, prefix="/api/v1")
+app.include_router(audit.router, prefix="/api/v1")
 
 configure_openapi(app)
 
@@ -189,3 +200,30 @@ if _FRONTEND_DIST.exists():
         return _FrontendFileResponse(_FRONTEND_DIST / "index.html")
 # --- FRONTEND_STATIC_SERVING_END ---
 
+
+
+# SPRINT 26 - no-cache para HTML do SPA
+# Evita que rotas como /reports carreguem um index.html antigo do navegador/proxy.
+@app.middleware("http")
+async def add_no_cache_headers_for_spa_html(request, call_next):
+    response = await call_next(request)
+
+    content_type = response.headers.get("content-type", "")
+    path = request.url.path
+
+    if (
+        request.method == "GET"
+        and not path.startswith("/api/")
+        and "text/html" in content_type
+    ):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+
+    return response
+
+# --- FINAL_AGENT_RUNTIME_INCLUDE ---
+# Registrado ao final para garantir prioridade funcional mesmo com rotas SPA/catch-all.
+app.include_router(agent_runtime_routes.router, prefix=settings.API_V1_STR)
+
+app.include_router(agent_enrollment_routes.router, prefix=settings.API_V1_STR)
