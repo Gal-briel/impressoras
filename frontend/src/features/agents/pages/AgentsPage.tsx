@@ -58,9 +58,13 @@ function matchesSearch(agent: Agent, search: string) {
   return searchableText.includes(normalizedSearch);
 }
 
+function isRevokedAgent(agent: Agent) {
+  return Boolean(agent.revoked_at) || getAgentDisplayStatus(agent) === 'revoked';
+}
+
 function matchesStatus(agent: Agent, status: AgentStatusFilter) {
   if (status === 'all') {
-    return true;
+    return !isRevokedAgent(agent);
   }
 
   if (status === 'online') {
@@ -68,14 +72,42 @@ function matchesStatus(agent: Agent, status: AgentStatusFilter) {
   }
 
   if (status === 'offline') {
-    return !isAgentOnline(agent) && getAgentDisplayStatus(agent) !== 'revoked';
+    return !isAgentOnline(agent) && !isRevokedAgent(agent);
   }
 
   return getAgentDisplayStatus(agent) === status;
 }
 
 function getAgentGroupKey(agent: Agent) {
-  return agent.group_id || agent.group_name || 'sem-grupo';
+  if (agent.grouping_status === 'manual' && agent.group_id) {
+    return `manual:${agent.group_id}`;
+  }
+
+  if (agent.domain_name) {
+    return `domain:${agent.domain_name}`;
+  }
+
+  if (agent.group_id && agent.group_name && agent.group_name !== 'Sem domínio') {
+    return `group:${agent.group_id}`;
+  }
+
+  return 'sem-dominio';
+}
+
+function getAgentGroupName(agent: Agent) {
+  if (agent.grouping_status === 'manual' && agent.group_name) {
+    return agent.group_name;
+  }
+
+  if (agent.domain_name) {
+    return agent.domain_name;
+  }
+
+  if (agent.group_name && agent.group_name !== 'Sem domínio') {
+    return agent.group_name;
+  }
+
+  return 'Sem domínio';
 }
 
 export function AgentsPage() {
@@ -91,7 +123,11 @@ export function AgentsPage() {
     const groups = new Map<string, string>();
 
     for (const agent of agents) {
-      groups.set(getAgentGroupKey(agent), agent.group_name || 'Sem grupo');
+      if (!matchesStatus(agent, status)) {
+        continue;
+      }
+
+      groups.set(getAgentGroupKey(agent), getAgentGroupName(agent));
     }
 
     return Array.from(groups.entries())
@@ -122,7 +158,10 @@ export function AgentsPage() {
   ).length;
   const groupsTotal = groupOptions.length;
   const reviewAgents = agents.filter(
-    (agent) => agent.grouping_status === 'requires_review',
+    (agent) =>
+      agent.grouping_status === 'requires_review' &&
+      !agent.domain_name &&
+      !isRevokedAgent(agent),
   ).length;
 
   return (

@@ -9,12 +9,40 @@ function isAgentOnline(agent: Agent) {
   return getAgentDisplayStatus(agent) === 'online';
 }
 
+function isRevokedAgent(agent: Agent) {
+  return Boolean(agent.revoked_at) || getAgentDisplayStatus(agent) === 'revoked';
+}
+
 function groupKey(agent: Agent) {
-  return agent.group_id || agent.group_name || 'sem-grupo';
+  if (agent.grouping_status === 'manual' && agent.group_id) {
+    return `manual:${agent.group_id}`;
+  }
+
+  if (agent.domain_name) {
+    return `domain:${agent.domain_name}`;
+  }
+
+  if (agent.group_id && agent.group_name && agent.group_name !== 'Sem domínio') {
+    return `group:${agent.group_id}`;
+  }
+
+  return 'sem-dominio';
 }
 
 function groupName(agent: Agent) {
-  return agent.group_name || 'Sem grupo';
+  if (agent.grouping_status === 'manual' && agent.group_name) {
+    return agent.group_name;
+  }
+
+  if (agent.domain_name) {
+    return agent.domain_name;
+  }
+
+  if (agent.group_name && agent.group_name !== 'Sem domínio') {
+    return agent.group_name;
+  }
+
+  return 'Sem domínio';
 }
 
 type AgentsGroupedViewProps = {
@@ -49,7 +77,10 @@ export function AgentsGroupedView({ agents }: AgentsGroupedViewProps) {
           total: groupAgents.length,
           online: groupAgents.filter(isAgentOnline).length,
           review: groupAgents.filter(
-            (agent) => agent.grouping_status === 'requires_review',
+            (agent) =>
+              agent.grouping_status === 'requires_review' &&
+              !agent.domain_name &&
+              !isRevokedAgent(agent),
           ).length,
         };
       })
