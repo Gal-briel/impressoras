@@ -3,13 +3,14 @@ import ipaddress
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db_session
 from app.core.dependencies import CurrentUser, require_permissions, require_agent_auth
 from app.infrastructure.database.models import Agent, Printer, AgentGroup
+from app.services.audit_service import get_request_ip, log_audit_event
 
 router = APIRouter(tags=["printers"])
 
@@ -313,6 +314,7 @@ async def list_agent_printers(
 @router.post("/agents/{agent_id}/printers/inventory")
 async def upsert_agent_printer_inventory(
     agent_id: UUID,
+    request: Request,
     body: dict = Body(...),
     current_user: CurrentUser = Depends(require_permissions(["printers:write"])),
     session: AsyncSession = Depends(get_db_session),
@@ -433,12 +435,24 @@ async def upsert_agent_printer_inventory(
 
     await session.commit()
 
-    return {
+    result_payload = {
         "created": created_count,
         "updated": updated_count,
         "ignored": ignored_count,
         "total_received": len(printers_payload),
     }
+
+    await log_audit_event(
+        tenant_id=current_user.tenant_id,
+        user_id=current_user.id,
+        action="printer_inventory_updated",
+        target_type="agent",
+        target_id=agent_id,
+        ip_address=get_request_ip(request),
+        metadata_payload=result_payload,
+    )
+
+    return result_payload
 
 
 @router.post("/agent/printers/inventory")

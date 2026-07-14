@@ -18,12 +18,52 @@ from app.services.command_policy import validate_and_authorize_command
 
 logger = logging.getLogger(__name__)
 
+
+SENSITIVE_AUDIT_KEYS = {
+    "password",
+    "senha",
+    "secret",
+    "token",
+    "api_key",
+    "apikey",
+    "authorization",
+    "credential",
+    "credentials",
+    "private_key",
+}
+
+
+def _sanitize_audit_value(value, depth: int = 0):
+    if depth > 3:
+        return "[truncated]"
+
+    if isinstance(value, dict):
+        clean = {}
+        for key, item in value.items():
+            key_text = str(key).lower()
+            if any(secret in key_text for secret in SENSITIVE_AUDIT_KEYS):
+                clean[str(key)] = "[redacted]"
+            else:
+                clean[str(key)] = _sanitize_audit_value(item, depth + 1)
+        return clean
+
+    if isinstance(value, list):
+        return [_sanitize_audit_value(item, depth + 1) for item in value[:20]]
+
+    if isinstance(value, str):
+        if len(value) > 500:
+            return value[:500] + "...[truncated]"
+        return value
+
+    return value
+
+
 class CommandService:
     def __init__(self, repository: CommandRepository, audit_repository: BaseRepository):
         self.repository = repository
         self.audit_repository = audit_repository
 
-    async def dispatch_command(self, tenant_id: UUID, agent_id: UUID, user_id: UUID, command_in: CommandCreate, user_permissions: Optional[list[str]] = None) -> CommandResponse:
+    async def dispatch_command(self, tenant_id: UUID, agent_id: UUID, user_id: UUID, command_in: CommandCreate, user_permissions: Optional[list[str]] = None, ip_address: Optional[str] = None) -> CommandResponse:
         correlation_id = str(uuid4()) 
         now = datetime.now(timezone.utc)
         
@@ -75,10 +115,14 @@ class CommandService:
             action="command_created",
             target_type="command",
             target_id=str(command.id),
+            ip_address=ip_address,
             metadata_payload={
+                "agent_id": str(agent_id),
                 "command_type": command.command_type,
                 "correlation_id": correlation_id,
                 "idempotency_key": command.idempotency_key,
+                "timeout_seconds": command.timeout_seconds,
+                "payload": _sanitize_audit_value(command.payload or {}),
             },
         )
         self.audit_repository.session.add(audit_log)

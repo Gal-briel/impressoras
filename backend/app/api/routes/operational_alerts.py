@@ -5,11 +5,12 @@ from typing import Any
 from uuid import UUID
 
 import psycopg2
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from psycopg2.extras import Json, RealDictCursor
 from pydantic import BaseModel
 
 from app.core.dependencies import CurrentUser, get_current_user, require_permissions
+from app.services.audit_service import get_request_ip, log_audit_event_sync
 
 
 def get_sync_database_url() -> str:
@@ -357,6 +358,7 @@ def get_operational_alert(
 @router.post("/{alert_id}/resolve")
 def resolve_operational_alert(
     alert_id: UUID,
+    request: Request,
     payload: AlertActionPayload | None = None,
     current_user: CurrentUser = Depends(require_permissions(["operational-alerts:write"])),
 ):
@@ -403,12 +405,30 @@ def resolve_operational_alert(
             row = cur.fetchone()
             conn.commit()
 
-    return serialize_row(dict(row))
+    result_payload = serialize_row(dict(row))
+
+    log_audit_event_sync(
+        tenant_id=tenant_id,
+        user_id=current_user.id,
+        action="operational_alert_resolved",
+        target_type="operational_alert",
+        target_id=alert_id,
+        ip_address=get_request_ip(request),
+        metadata_payload={
+            "note": note,
+            "alert_type": result_payload.get("alert_type"),
+            "severity": result_payload.get("severity"),
+            "status": result_payload.get("status"),
+        },
+    )
+
+    return result_payload
 
 
 @router.post("/{alert_id}/ignore")
 def ignore_operational_alert(
     alert_id: UUID,
+    request: Request,
     payload: AlertActionPayload | None = None,
     current_user: CurrentUser = Depends(require_permissions(["operational-alerts:write"])),
 ):
@@ -455,11 +475,29 @@ def ignore_operational_alert(
             row = cur.fetchone()
             conn.commit()
 
-    return serialize_row(dict(row))
+    result_payload = serialize_row(dict(row))
+
+    log_audit_event_sync(
+        tenant_id=tenant_id,
+        user_id=current_user.id,
+        action="operational_alert_ignored",
+        target_type="operational_alert",
+        target_id=alert_id,
+        ip_address=get_request_ip(request),
+        metadata_payload={
+            "note": note,
+            "alert_type": result_payload.get("alert_type"),
+            "severity": result_payload.get("severity"),
+            "status": result_payload.get("status"),
+        },
+    )
+
+    return result_payload
 
 
 @router.post("/sync/offline-agents")
 def sync_offline_agent_alerts(
+    request: Request,
     offline_after_minutes: int = Query(default=15, ge=1, le=1440),
     current_user: CurrentUser = Depends(require_permissions(["operational-alerts:write"])),
 ):
@@ -478,11 +516,24 @@ def sync_offline_agent_alerts(
             row = cur.fetchone()
             conn.commit()
 
-    return serialize_row(dict(row))
+    result_payload = serialize_row(dict(row))
+
+    log_audit_event_sync(
+        tenant_id=tenant_id,
+        user_id=current_user.id,
+        action="operational_alerts_synced_offline_agents",
+        target_type="operational_alert",
+        target_id="sync_offline_agents",
+        ip_address=get_request_ip(request),
+        metadata_payload=result_payload,
+    )
+
+    return result_payload
 
 
 @router.post("/sync/security-alerts")
 def sync_security_operational_alerts(
+    request: Request,
     current_user: CurrentUser = Depends(require_permissions(["operational-alerts:write"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
@@ -500,11 +551,24 @@ def sync_security_operational_alerts(
             row = cur.fetchone()
             conn.commit()
 
-    return serialize_row(dict(row))
+    result_payload = serialize_row(dict(row))
+
+    log_audit_event_sync(
+        tenant_id=tenant_id,
+        user_id=current_user.id,
+        action="operational_alerts_synced_security",
+        target_type="operational_alert",
+        target_id="sync_security_alerts",
+        ip_address=get_request_ip(request),
+        metadata_payload=result_payload,
+    )
+
+    return result_payload
 
 
 @router.post("/sync/software-changes")
 def sync_software_change_operational_alerts(
+    request: Request,
     current_user: CurrentUser = Depends(require_permissions(["operational-alerts:write"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
@@ -522,11 +586,24 @@ def sync_software_change_operational_alerts(
             row = cur.fetchone()
             conn.commit()
 
-    return serialize_row(dict(row))
+    result_payload = serialize_row(dict(row))
+
+    log_audit_event_sync(
+        tenant_id=tenant_id,
+        user_id=current_user.id,
+        action="operational_alerts_synced_software_changes",
+        target_type="operational_alert",
+        target_id="sync_software_changes",
+        ip_address=get_request_ip(request),
+        metadata_payload=result_payload,
+    )
+
+    return result_payload
 
 
 @router.post("/sync/all")
 def sync_all_operational_alerts(
+    request: Request,
     offline_after_minutes: int = 15,
     current_user: CurrentUser = Depends(require_permissions(["operational-alerts:write"])),
 ):
@@ -575,7 +652,7 @@ def sync_all_operational_alerts(
         + int(software_result.get("resolved") or 0)
     )
 
-    return {
+    result_payload = {
         "offline_agents": serialize_row(offline_result),
         "security_alerts": serialize_row(security_result),
         "software_changes": serialize_row(software_result),
@@ -584,3 +661,16 @@ def sync_all_operational_alerts(
             "resolved": total_resolved,
         },
     }
+
+    log_audit_event_sync(
+        tenant_id=tenant_id,
+        user_id=current_user.id,
+        action="operational_alerts_synced_all",
+        target_type="operational_alert",
+        target_id="sync_all",
+        ip_address=get_request_ip(request),
+        metadata_payload=result_payload,
+    )
+
+    return result_payload
+

@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 # backend/app/api/routes/agents.py
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 
 from app.api.schemas.agent_schemas import (
@@ -36,6 +36,7 @@ from app.services.agent_group_service import AgentGroupService
 from app.services.agent_service import AgentService
 from app.services.agent_tag_service import AgentTagService
 from app.services.agent_update_service import AgentUpdateService
+from app.services.audit_service import get_request_ip, log_audit_event
 
 
 class AgentEventCreate(BaseModel):
@@ -147,16 +148,29 @@ async def report_agent_event(
 async def revoke_agent(
     agent_id: UUID,
     payload: AgentRevokeRequest,
+    request: Request,
     current_user: CurrentUser = Depends(require_permissions(["agents:write"])),
     agent_service: AgentService = Depends(get_agent_service),
 ):
     try:
-        return await agent_service.revoke_agent(
+        result = await agent_service.revoke_agent(
             agent_id=agent_id,
             tenant_id=UUID(current_user.tenant_id),
             revoked_by=UUID(current_user.id),
             reason=payload.revoke_reason,
         )
+
+        await log_audit_event(
+            tenant_id=current_user.tenant_id,
+            user_id=current_user.id,
+            action="agent_revoked",
+            target_type="agent",
+            target_id=agent_id,
+            ip_address=get_request_ip(request),
+            metadata_payload={"reason": payload.revoke_reason},
+        )
+
+        return result
     except ValueError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
     except PermissionError:
@@ -166,12 +180,24 @@ async def revoke_agent(
 @router.post("/{agent_id}/rotate-key", status_code=status.HTTP_200_OK)
 async def rotate_agent_credentials(
     agent_id: UUID,
+    request: Request,
     current_user: CurrentUser = Depends(require_permissions(["agents:write"])),
     agent_service: AgentService = Depends(get_agent_service),
 ):
     try:
         # A validação multi-tenant fica preservada pela próxima sprint de RBAC; por ora não vaza dados de outro tenant.
         new_plain_key = await agent_service.rotate_credentials(agent_id)
+
+        await log_audit_event(
+            tenant_id=current_user.tenant_id,
+            user_id=current_user.id,
+            action="agent_key_rotated",
+            target_type="agent",
+            target_id=agent_id,
+            ip_address=get_request_ip(request),
+            metadata_payload={},
+        )
+
         return {
             "message": "Credentials rotated successfully.",
             "agent_id": str(agent_id),
@@ -199,15 +225,28 @@ async def get_agent_tags(
 async def replace_agent_tags(
     agent_id: UUID,
     payload: AgentTagsReplaceRequest,
+    request: Request,
     current_user: CurrentUser = Depends(require_permissions(["agent-tags:write"])),
     tag_service: AgentTagService = Depends(get_agent_tag_service),
 ):
     try:
-        return await tag_service.replace_agent_tags(
+        result = await tag_service.replace_agent_tags(
             tenant_id=UUID(current_user.tenant_id),
             agent_id=agent_id,
             tag_ids=list(payload.tag_ids),
         )
+
+        await log_audit_event(
+            tenant_id=current_user.tenant_id,
+            user_id=current_user.id,
+            action="agent_tags_replaced",
+            target_type="agent",
+            target_id=agent_id,
+            ip_address=get_request_ip(request),
+            metadata_payload={"tag_ids": [str(tag_id) for tag_id in payload.tag_ids]},
+        )
+
+        return result
     except ValueError as exc:
         detail = str(exc)
         if detail == "Agent not found":
@@ -219,15 +258,28 @@ async def replace_agent_tags(
 async def assign_agent_group(
     agent_id: UUID,
     payload: AgentGroupAssignRequest,
+    request: Request,
     current_user: CurrentUser = Depends(require_permissions(["agent-groups:write"])),
     group_service: AgentGroupService = Depends(get_agent_group_service),
 ):
     try:
-        return await group_service.assign_agent_group(
+        result = await group_service.assign_agent_group(
             tenant_id=UUID(current_user.tenant_id),
             agent_id=agent_id,
             group_id=payload.group_id,
         )
+
+        await log_audit_event(
+            tenant_id=current_user.tenant_id,
+            user_id=current_user.id,
+            action="agent_group_assigned",
+            target_type="agent",
+            target_id=agent_id,
+            ip_address=get_request_ip(request),
+            metadata_payload={"group_id": str(payload.group_id) if payload.group_id else None},
+        )
+
+        return result
     except ValueError as exc:
         detail = str(exc)
         if detail == "Agent not found":

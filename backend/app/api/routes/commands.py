@@ -2,7 +2,7 @@
 from uuid import UUID
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +21,25 @@ from app.services.command_policy import CommandPermissionDenied, CommandPolicyVi
 from app.core.dependencies import require_agent_auth
 
 router = APIRouter(tags=["commands"])
+
+
+def _get_request_ip(request: Request) -> str | None:
+    cf_ip = request.headers.get("cf-connecting-ip")
+    if cf_ip:
+        return cf_ip.strip()
+
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip:
+        return real_ip.strip()
+
+    if request.client:
+        return request.client.host
+
+    return None
 
 
 def _safe_status(command: Command) -> str:
@@ -173,6 +192,7 @@ async def list_agent_commands(
 async def create_command(
     agent_id: UUID,
     command_in: CommandCreate,
+    request: Request,
     current_user: CurrentUser = Depends(require_permissions(["commands:execute"])),
     command_service: CommandService = Depends(get_command_service),
 ):
@@ -183,6 +203,7 @@ async def create_command(
             user_id=UUID(current_user.id),
             command_in=command_in,
             user_permissions=current_user.permissions,
+            ip_address=_get_request_ip(request),
         )
     except CommandPermissionDenied as exc:
         raise HTTPException(

@@ -4,7 +4,7 @@ from typing import Any
 from uuid import UUID
 
 from app.core.dependencies import require_permissions
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from psycopg2.extras import RealDictCursor
 
 from app.api.routes.operational_alerts import (
@@ -14,6 +14,7 @@ from app.api.routes.operational_alerts import (
     serialize_row,
 )
 from app.api.routes.auth import get_current_user
+from app.services.audit_service import get_request_ip, log_audit_event_sync
 
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
@@ -180,6 +181,7 @@ def list_notifications(
 @router.post("/{notification_id}/read")
 def mark_notification_as_read(
     notification_id: UUID,
+    request: Request,
     current_user: CurrentUser = Depends(require_permissions(["notifications:write"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
@@ -213,12 +215,27 @@ def mark_notification_as_read(
     if not notification:
         raise HTTPException(status_code=404, detail="Notification not found")
 
+    log_audit_event_sync(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        action="notification_marked_read",
+        target_type="notification",
+        target_id=notification_id,
+        ip_address=get_request_ip(request),
+        metadata_payload={
+            "notification_type": notification.get("notification_type"),
+            "severity": notification.get("severity"),
+            "status": notification.get("status"),
+        },
+    )
+
     return notification
 
 
 @router.post("/{notification_id}/archive")
 def archive_notification_by_id(
     notification_id: UUID,
+    request: Request,
     current_user: CurrentUser = Depends(require_permissions(["notifications:write"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
@@ -253,11 +270,26 @@ def archive_notification_by_id(
     if not notification:
         raise HTTPException(status_code=404, detail="Notification not found")
 
+    log_audit_event_sync(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        action="notification_archived",
+        target_type="notification",
+        target_id=notification_id,
+        ip_address=get_request_ip(request),
+        metadata_payload={
+            "notification_type": notification.get("notification_type"),
+            "severity": notification.get("severity"),
+            "status": notification.get("status"),
+        },
+    )
+
     return notification
 
 
 @router.post("/read-all")
 def mark_all_notifications_as_read(
+    request: Request,
     current_user: CurrentUser = Depends(require_permissions(["notifications:write"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
@@ -286,16 +318,30 @@ def mark_all_notifications_as_read(
             rows = cur.fetchall()
             conn.commit()
 
-    return {
+    result_payload = {
         "updated": len(rows),
     }
+
+    log_audit_event_sync(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        action="notifications_marked_read_all",
+        target_type="notification",
+        target_id="bulk",
+        ip_address=get_request_ip(request),
+        metadata_payload=result_payload,
+    )
+
+    return result_payload
 
 
 @router.post("/sync/operational-alerts")
 def sync_operational_alert_notifications(
+    request: Request,
     current_user: CurrentUser = Depends(require_permissions(["notifications:write"])),
 ):
     tenant_id = get_current_tenant_id(current_user)
+    user_id = get_current_user_id(current_user)
 
     with get_connection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -310,4 +356,16 @@ def sync_operational_alert_notifications(
             row = cur.fetchone() or {}
             conn.commit()
 
-    return serialize_row(dict(row))
+    result_payload = serialize_row(dict(row))
+
+    log_audit_event_sync(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        action="notifications_operational_alerts_synced",
+        target_type="notification",
+        target_id="sync_operational_alerts",
+        ip_address=get_request_ip(request),
+        metadata_payload=result_payload,
+    )
+
+    return result_payload
