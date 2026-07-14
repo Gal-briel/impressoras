@@ -22,7 +22,7 @@ from app.api.routes import (
     settings as settings_routes,
     websockets,
 )
-from app.core.config import settings
+from app.core.config import settings, validate_runtime_security
 from app.core.middleware import AuditMiddleware
 from app.core.openapi import configure_openapi
 from app.core.redis import redis_client
@@ -70,6 +70,8 @@ async def lifespan(app: FastAPI):
             with contextlib.suppress(Exception):
                 await rabbitmq_client.connection.close()
 
+
+validate_runtime_security()
 
 app = FastAPI(
     title=settings.PROJECT_NAME,

@@ -107,3 +107,47 @@ def get_sync_database_url() -> str:
         "postgresql://",
     )
 
+
+
+
+def validate_runtime_security() -> None:
+    """Bloqueia inicialização insegura em produção."""
+    import os
+
+    environment = (
+        os.getenv("ENVIRONMENT")
+        or os.getenv("APP_ENV")
+        or os.getenv("PYTHON_ENV")
+        or "development"
+    ).strip().lower()
+
+    if environment not in {"production", "prod"}:
+        return
+
+    secret_key = str(settings.SECRET_KEY or "").strip()
+    jwt_secret_key = str(getattr(settings, "JWT_SECRET_KEY", "") or "").strip()
+    database_url = str(settings.DATABASE_URL or "").strip()
+
+    weak_values = {
+        "",
+        "change-me",
+        "changeme",
+        "secret",
+        "dev",
+        "development",
+        "troque-esta-chave-em-producao",
+        "super-secret-key",
+        "your-secret-key",
+    }
+
+    if secret_key.lower() in weak_values or len(secret_key) < 32:
+        raise RuntimeError("Configuração insegura: SECRET_KEY forte é obrigatória em produção.")
+
+    if jwt_secret_key and (jwt_secret_key.lower() in weak_values or len(jwt_secret_key) < 32):
+        raise RuntimeError("Configuração insegura: JWT_SECRET_KEY forte é obrigatória em produção.")
+
+    if not database_url:
+        raise RuntimeError("Configuração insegura: DATABASE_URL é obrigatório em produção.")
+
+    if "localhost" in database_url or "127.0.0.1" in database_url:
+        raise RuntimeError("Configuração insegura: DATABASE_URL local não é permitido em produção.")
