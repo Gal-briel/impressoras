@@ -1,1 +1,45 @@
+# Env / secrets
+.env
+.env.*
+!.env.example
+!.env.production
+backend/.env
+backend/.env.*
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.production.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+backend/.venv/
+.venv/
+
+# Node / frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+
+# Agent runtime/config
+agent/windows/config.json
+agent/windows/logs/
+agent/windows/*.log
+
+# Agent build artifacts
+agent/windows/dist/
+agent/windows/dist/package_tmp*/
+*.zip
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Backups
 backups/
