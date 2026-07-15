@@ -25,6 +25,15 @@ class Settings(BaseSettings):
     REDIS_URL: str
     RABBITMQ_URL: str
 
+    # CORS
+    BACKEND_CORS_ORIGINS: str = (
+        "http://localhost:5173,"
+        "http://127.0.0.1:5173,"
+        "http://localhost:3000,"
+        "http://127.0.0.1:3000"
+    )
+    CORS_ALLOW_CREDENTIALS: bool = True
+
     # Banco de Dados
     DATABASE_URL: Optional[str] = None
     POSTGRES_USER: str
@@ -33,6 +42,25 @@ class Settings(BaseSettings):
     POSTGRES_HOST: Optional[str] = None
     POSTGRES_PORT: int = 5432
     POSTGRES_DB: str
+
+    @computed_field
+    @property
+    def CORS_ORIGINS(self) -> list[str]:
+        """Lista de origens permitidas para CORS.
+
+        Use BACKEND_CORS_ORIGINS no .env separado por vírgula.
+        Exemplo:
+        BACKEND_CORS_ORIGINS=https://painel.exemplo.com,http://localhost:5173
+        """
+        origins: list[str] = []
+
+        for raw_origin in str(self.BACKEND_CORS_ORIGINS or "").split(","):
+            origin = raw_origin.strip().rstrip("/")
+
+            if origin:
+                origins.append(origin)
+
+        return origins
 
     @computed_field
     @property
@@ -151,3 +179,11 @@ def validate_runtime_security() -> None:
 
     if "localhost" in database_url or "127.0.0.1" in database_url:
         raise RuntimeError("Configuração insegura: DATABASE_URL local não é permitido em produção.")
+
+    cors_origins = list(getattr(settings, "CORS_ORIGINS", []) or [])
+
+    if not cors_origins:
+        raise RuntimeError("Configuração insegura: BACKEND_CORS_ORIGINS é obrigatório em produção.")
+
+    if "*" in cors_origins:
+        raise RuntimeError("Configuração insegura: CORS com '*' não é permitido em produção.")
