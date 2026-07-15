@@ -1,5 +1,6 @@
 # backend/app/services/command_service.py
 import asyncio
+import json
 import logging
 from typing import Optional
 from uuid import UUID, uuid4
@@ -31,6 +32,24 @@ SENSITIVE_AUDIT_KEYS = {
     "credentials",
     "private_key",
 }
+
+
+def _safe_audit_output(value):
+    if value is None:
+        return None
+
+    if isinstance(value, (dict, list)):
+        return _sanitize_audit_value(value)
+
+    text = str(value)
+
+    try:
+        parsed = json.loads(text)
+        return _sanitize_audit_value(parsed)
+    except Exception:
+        if len(text) > 1000:
+            return text[:1000] + "...[truncated]"
+        return text
 
 
 def _sanitize_audit_value(value, depth: int = 0):
@@ -109,6 +128,18 @@ class CommandService:
         
         # Registro do ciclo de vida no Audit Log.
         # Evita BaseRepository.create(obj_in={}), que quebrava porque dict não tem model_dump().
+        command_payload = command.payload or {}
+        audit_metadata = {
+            "command_id": str(command.id),
+            "agent_id": str(agent_id),
+            "agent_hostname": getattr(agent, "hostname", None),
+            "command_type": command.command_type,
+            "correlation_id": correlation_id,
+            "idempotency_key": command.idempotency_key,
+            "timeout_seconds": command.timeout_seconds,
+            "payload": _sanitize_audit_value(command_payload),
+        }
+
         audit_log = self.audit_repository.model(
             tenant_id=tenant_id,
             user_id=user_id,
@@ -116,16 +147,33 @@ class CommandService:
             target_type="command",
             target_id=str(command.id),
             ip_address=ip_address,
-            metadata_payload={
-                "agent_id": str(agent_id),
-                "command_type": command.command_type,
-                "correlation_id": correlation_id,
-                "idempotency_key": command.idempotency_key,
-                "timeout_seconds": command.timeout_seconds,
-                "payload": _sanitize_audit_value(command.payload or {}),
-            },
+            metadata_payload=audit_metadata,
         )
         self.audit_repository.session.add(audit_log)
+
+        if command.command_type == "update_agent":
+            update_audit_log = self.audit_repository.model(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                action="agent_update_requested",
+                target_type="agent",
+                target_id=str(agent_id),
+                ip_address=ip_address,
+                metadata_payload={
+                    "command_id": str(command.id),
+                    "agent_id": str(agent_id),
+                    "agent_hostname": getattr(agent, "hostname", None),
+                    "correlation_id": correlation_id,
+                    "idempotency_key": command.idempotency_key,
+                    "version": command_payload.get("version"),
+                    "release_id": command_payload.get("release_id"),
+                    "package_url": command_payload.get("package_url"),
+                    "sha256": command_payload.get("sha256"),
+                    "timeout_seconds": command.timeout_seconds,
+                },
+            )
+            self.audit_repository.session.add(update_audit_log)
+
         await self.audit_repository.session.flush()
         
         payload = {
@@ -283,6 +331,38 @@ class CommandService:
             update_data["started_at"] = now
         
         await self.repository.update(command, update_data)
+
+        completion_metadata = {
+            "command_id": str(command.id),
+            "agent_id": str(command.agent_id),
+            "command_type": command.command_type,
+            "correlation_id": command.correlation_id,
+            "idempotency_key": command.idempotency_key,
+            "status": str(final_status.value if hasattr(final_status, "value") else final_status),
+            "payload_status": payload_status,
+            "error_code": error_code,
+            "output": _safe_audit_output(output),
+        }
+
+        audit_action = "agent_update_finished" if command.command_type == "update_agent" else "command_finished"
+
+        if command.command_type == "update_agent":
+            command_payload = command.payload or {}
+            completion_metadata["version"] = command_payload.get("version")
+            completion_metadata["release_id"] = command_payload.get("release_id")
+            completion_metadata["package_url"] = command_payload.get("package_url")
+            completion_metadata["sha256"] = command_payload.get("sha256")
+
+        audit_log = self.audit_repository.model(
+            tenant_id=command.tenant_id,
+            user_id=command.user_id,
+            action=audit_action,
+            target_type="command",
+            target_id=str(command.id),
+            metadata_payload=_sanitize_audit_value(completion_metadata),
+        )
+        self.audit_repository.session.add(audit_log)
+
         await self.repository.session.commit()
 
         # Dispara evento de finalização para o dashboard
