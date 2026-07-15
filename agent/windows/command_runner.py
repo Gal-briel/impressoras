@@ -241,6 +241,7 @@ try {{
     $DownloadHeaders = @{{
         "x-agent-id" = $AgentId
         "Authorization" = "ApiKey $AgentApiKey"
+        "ngrok-skip-browser-warning" = "true"
     }}
 
     Write-UpdateLog "Baixando pacote autenticado..."
