@@ -2,63 +2,38 @@
 
 import asyncio
 import logging
-from sqlalchemy import update, text
+
 from app.core.database import AsyncSessionLocal
-from app.infrastructure.database.enums import CommandStatus
-from app.infrastructure.database.models import Command
+from app.infrastructure.database.models import AuditLog
+from app.repositories.base import BaseRepository
+from app.repositories.command_repository import CommandRepository
+from app.services.command_service import CommandService
 
 logger = logging.getLogger(__name__)
 
+
 async def monitor_command_timeouts(interval_seconds: int = 10) -> None:
     """
-    Varre periodicamente o banco de dados em busca de comandos que excederam
-    o tempo limite de execução estabelecido ou que expiraram na fila sem resposta.
+    Varre periodicamente comandos vencidos e delega a regra de negócio
+    para CommandService, preservando audit log, websocket e estados terminais.
     """
     while True:
         try:
             async with AsyncSessionLocal() as session:
-                # 1. Fluxo de Timeout Existente (Tempo de execução ou ciclo excedido)
-                non_terminal_statuses = [
-                    CommandStatus.QUEUED,
-                    CommandStatus.DISPATCHED,
-                    CommandStatus.ACKNOWLEDGED,
-                    CommandStatus.EXECUTING
-                ]
-                
-                timeout_stmt = (
-                    update(Command)
-                    .where(
-                        Command.status.in_(non_terminal_statuses),
-                        Command.created_at + text("INTERVAL '1 second' * commands.timeout_seconds") < text("NOW()")
-                    )
-                    .values(status=CommandStatus.TIMED_OUT)
+                command_service = CommandService(
+                    CommandRepository(session),
+                    BaseRepository(AuditLog, session),
                 )
-                timeout_result = await session.execute(timeout_stmt)
-                
-                # 2. NOVO: Varredura e marcação de comandos que estagnaram e expiraram sem resposta
-                stale_statuses = [CommandStatus.QUEUED, CommandStatus.DISPATCHED]
-                
-                expire_stmt = (
-                    update(Command)
-                    .where(
-                        Command.status.in_(stale_statuses),
-                        Command.expires_at < text("NOW()")
+
+                expired_count = await command_service.expire_stale_commands()
+
+                if expired_count > 0:
+                    logger.info(
+                        "Command timeout monitor: %s comandos marcados como EXPIRED.",
+                        expired_count,
                     )
-                    .values(status=CommandStatus.EXPIRED, error_code="QUEUE_TTL_EXCEEDED")
-                )
-                expire_result = await session.execute(expire_stmt)
-                
-                # Confirma ambas as atualizações de lote
-                await session.commit()
-                
-                # Logs informativos se houveram alterações
-                if timeout_result.rowcount > 0:
-                    logger.info(f"Idempotency Timeout Monitor: {timeout_result.rowcount} comandos marcados como TIMED_OUT.")
-                
-                if expire_result.rowcount > 0:
-                    logger.info(f"Queue Expiration Monitor: {expire_result.rowcount} comandos marcados como EXPIRED.")
-                    
-        except Exception as e:
-            logger.error(f"Erro durante a execução do monitor de tempo de comandos: {e}")
-            
+
+        except Exception:
+            logger.exception("Erro durante a execução do monitor de tempo de comandos")
+
         await asyncio.sleep(interval_seconds)

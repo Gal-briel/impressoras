@@ -349,6 +349,114 @@ class CommandService:
 
         return CommandResponse.model_validate(command)
 
+    async def expire_stale_commands(self, limit: int = 500) -> int:
+        """Marca comandos vencidos como expired sem sobrescrever estados terminais."""
+        now = datetime.now(timezone.utc)
+
+        stale_statuses = [
+            getattr(CommandStatus, name)
+            for name in ("QUEUED", "DISPATCHED", "ACKNOWLEDGED", "EXECUTING")
+            if hasattr(CommandStatus, name)
+        ]
+
+        if not stale_statuses:
+            return 0
+
+        result = await self.repository.session.execute(
+            select(Command)
+            .where(
+                Command.status.in_(stale_statuses),
+                Command.expires_at.is_not(None),
+                Command.expires_at <= now,
+            )
+            .order_by(Command.expires_at.asc())
+            .limit(limit)
+        )
+
+        commands = list(result.scalars().all())
+
+        if not commands:
+            return 0
+
+        expired_events: list[dict[str, str]] = []
+
+        for command in commands:
+            current_status = str(
+                command.status.value if hasattr(command.status, "value") else command.status
+            )
+
+            command.status = CommandStatus.EXPIRED
+            command.error_code = "COMMAND_EXPIRED"
+            command.finished_at = now
+
+            if not command.output:
+                command.output = json.dumps(
+                    {
+                        "status": "expired",
+                        "reason": "Command expired before completion.",
+                    },
+                    ensure_ascii=False,
+                )
+
+            metadata = {
+                "command_id": str(command.id),
+                "agent_id": str(command.agent_id),
+                "command_type": command.command_type,
+                "previous_status": current_status,
+                "new_status": "expired",
+                "error_code": "COMMAND_EXPIRED",
+                "correlation_id": command.correlation_id,
+                "idempotency_key": command.idempotency_key,
+                "expires_at": command.expires_at.isoformat() if command.expires_at else None,
+                "expired_at": now.isoformat(),
+                "payload": _sanitize_audit_value(command.payload or {}),
+            }
+
+            audit_log = self.audit_repository.model(
+                tenant_id=command.tenant_id,
+                user_id=command.user_id,
+                action="command_expired",
+                target_type="command",
+                target_id=str(command.id),
+                metadata_payload=metadata,
+            )
+            self.audit_repository.session.add(audit_log)
+
+            expired_events.append(
+                {
+                    "tenant_id": str(command.tenant_id),
+                    "command_id": str(command.id),
+                    "agent_id": str(command.agent_id),
+                    "status": "expired",
+                }
+            )
+
+        await self.repository.session.flush()
+        await self.repository.session.commit()
+
+        for event in expired_events:
+            await websocket_manager.broadcast_event(
+                event["tenant_id"],
+                "command_finished",
+                {
+                    "command_id": event["command_id"],
+                    "agent_id": event["agent_id"],
+                    "status": "EXPIRED",
+                },
+            )
+            await websocket_manager.broadcast_event(
+                event["tenant_id"],
+                "command_expired",
+                {
+                    "command_id": event["command_id"],
+                    "agent_id": event["agent_id"],
+                    "status": "EXPIRED",
+                },
+            )
+
+        return len(expired_events)
+
+
     async def update_status_idempotent(self, command_id: UUID, new_status: CommandStatus, output: Optional[str] = None, error_code: Optional[str] = None) -> None:
         command = await self.repository.get(command_id)
         if not command:
