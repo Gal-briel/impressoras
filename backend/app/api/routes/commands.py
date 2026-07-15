@@ -227,6 +227,7 @@ async def agent_list_pending_commands(
     limit: int = Query(default=5, ge=1, le=25),
     agent_id: str = Depends(require_agent_auth),
     session: AsyncSession = Depends(get_db_session),
+    command_service: CommandService = Depends(get_command_service),
 ):
     agent_uuid = UUID(agent_id)
 
@@ -240,6 +241,9 @@ async def agent_list_pending_commands(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Agent not found",
         )
+
+    # Limpa comandos vencidos deste agente antes de resgatar os válidos
+    await command_service.expire_stale_commands(agent_id=agent_uuid, limit=25)
 
     now = datetime.now(timezone.utc)
 

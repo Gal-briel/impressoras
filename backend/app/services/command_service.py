@@ -349,7 +349,7 @@ class CommandService:
 
         return CommandResponse.model_validate(command)
 
-    async def expire_stale_commands(self, limit: int = 500) -> int:
+    async def expire_stale_commands(self, agent_id: UUID | None = None, tenant_id: UUID | None = None, limit: int = 500) -> int:
         """Marca comandos vencidos como expired sem sobrescrever estados terminais."""
         now = datetime.now(timezone.utc)
 
@@ -362,17 +362,23 @@ class CommandService:
         if not stale_statuses:
             return 0
 
-        result = await self.repository.session.execute(
+        stmt = (
             select(Command)
             .where(
                 Command.status.in_(stale_statuses),
                 Command.expires_at.is_not(None),
                 Command.expires_at <= now,
             )
-            .order_by(Command.expires_at.asc())
-            .limit(limit)
         )
 
+        if agent_id:
+            stmt = stmt.where(Command.agent_id == agent_id)
+        if tenant_id:
+            stmt = stmt.where(Command.tenant_id == tenant_id)
+
+        stmt = stmt.order_by(Command.expires_at.asc()).limit(limit)
+
+        result = await self.repository.session.execute(stmt)
         commands = list(result.scalars().all())
 
         if not commands:
