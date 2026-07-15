@@ -1,4 +1,5 @@
 import { api } from '../../../api/httpClient';
+import { createCommandIdempotencyKey } from '../../commands/utils/idempotency';
 
 export type UpdateAgentPayload = {
   package_url: string;
@@ -22,7 +23,7 @@ export async function createAgentUpdateCommand(
   const response = await api.post<UpdateAgentCommandResponse>(
     `/agents/${agentId}/commands`,
     {
-      idempotency_key: `update-agent-${agentId}-${Date.now()}`,
+      idempotency_key: createCommandIdempotencyKey('update_agent', agentId, 'agent-update'),
       command_type: 'update_agent',
       payload,
     }

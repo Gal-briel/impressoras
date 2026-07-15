@@ -1,4 +1,5 @@
 import { api } from '../../../api/httpClient';
+import { createCommandIdempotencyKey } from '../../commands/utils/idempotency';
 
 export type BulkAgent = {
   id: string;
@@ -109,9 +110,7 @@ export async function createAgentCommand(
   command: BulkCommandPayload
 ) {
   const response = await api.post(`/agents/${agentId}/commands`, {
-    idempotency_key: `bulk-${command.command_type}-${agentId}-${Date.now()}-${Math.random()
-      .toString(16)
-      .slice(2)}`,
+    idempotency_key: createCommandIdempotencyKey(command.command_type, agentId, 'bulk'),
     command_type: command.command_type,
     payload: command.payload || {},
   });

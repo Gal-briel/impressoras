@@ -2,6 +2,7 @@ import axios from 'axios';
 
 import { api } from '../../../api/httpClient';
 import type { ApiListResponse, Command, CreateCommandPayload } from '../types';
+import { createCommandIdempotencyKey } from '../utils/idempotency';
 
 function normalizeCommandsResponse(data: ApiListResponse<Command> | Command[]): ApiListResponse<Command> {
   if (Array.isArray(data)) {
@@ -15,14 +16,6 @@ function normalizeCommandsResponse(data: ApiListResponse<Command> | Command[]): 
     items: data.items || [],
     total: data.total ?? data.items?.length ?? 0,
   };
-}
-
-function createIdempotencyKey() {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return `web-${crypto.randomUUID()}`;
-  }
-
-  return `web-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 export async function getCommands(): Promise<ApiListResponse<Command>> {
@@ -72,7 +65,7 @@ export async function createCommand(payload: CreateCommandPayload): Promise<Comm
       command_type: payload.command_type,
       payload: payload.payload || {},
       timeout_seconds: payload.timeout_seconds ?? 60,
-      idempotency_key: payload.idempotency_key || createIdempotencyKey(),
+      idempotency_key: payload.idempotency_key || createCommandIdempotencyKey(String(payload.command_type), payload.agent_id),
     }
   );
 

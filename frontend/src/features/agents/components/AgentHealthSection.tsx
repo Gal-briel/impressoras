@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { api } from '../../../api/httpClient';
 import { AgentHealthCard } from './AgentHealthCard';
 import { useAgentHealth } from '../hooks/useAgentHealth';
+import { createCommandIdempotencyKey } from '../../commands/utils/idempotency';
 
 export function AgentHealthSection() {
   const params = useParams<{ id?: string; agentId?: string }>();
@@ -20,7 +21,7 @@ export function AgentHealthSection() {
       await api.post(`/agents/${agentId}/commands`, {
         command_type: 'collect_diagnostics',
         payload: {},
-        idempotency_key: `diagnostics-${Date.now()}`,
+        idempotency_key: createCommandIdempotencyKey('collect_diagnostics', agentId, 'agent-health'),
         timeout_seconds: 120,
       });
 

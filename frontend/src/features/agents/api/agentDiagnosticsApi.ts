@@ -1,4 +1,5 @@
 import { api } from '../../../api/httpClient';
+import { createCommandIdempotencyKey } from '../../commands/utils/idempotency';
 
 export type AgentCommandSummary = {
   id: string;
@@ -295,7 +296,7 @@ export async function createDiagnosticsCommand(agentId: string) {
   const response = await api.post(`/agents/${agentId}/commands`, {
     command_type: 'collect_diagnostics',
     payload: {},
-    idempotency_key: `diagnostics-${Date.now()}`,
+    idempotency_key: createCommandIdempotencyKey('collect_diagnostics', agentId, 'agent-diagnostics'),
     timeout_seconds: 120,
   });
 

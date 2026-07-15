@@ -5,6 +5,7 @@ import { Card } from '../../../components/ui/Card';
 import { useAgentCommands } from '../../commands/hooks/useAgentCommands';
 import { useCreateCommand } from '../../commands/hooks/useCommands';
 import type { Command } from '../../commands/types';
+import { createCommandIdempotencyKey } from '../../commands/utils/idempotency';
 import {
   useLatestPersistedSecuritySnapshot,
   usePersistedSoftwareInventory,
@@ -22,8 +23,8 @@ type SoftwareSourceFilter =
   | 'package_provider'
   | 'appx_store';
 
-function buildIdempotencyKey(commandType: string) {
-  return `${commandType}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+function buildIdempotencyKey(commandType: string, agentId?: string) {
+  return createCommandIdempotencyKey(commandType, agentId, 'security-inventory');
 }
 
 function getCommandType(command: Command) {
@@ -693,7 +694,7 @@ export function AgentSecurityInventorySection({ agentId }: AgentSecurityInventor
         agent_id: agentId,
         command_type: commandType,
         payload,
-        idempotency_key: buildIdempotencyKey(commandType),
+        idempotency_key: buildIdempotencyKey(commandType, agentId),
         timeout_seconds: timeoutSeconds,
       });
 

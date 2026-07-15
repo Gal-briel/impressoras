@@ -5,6 +5,7 @@ import { Card } from '../../../components/ui/Card';
 import { useAgentCommands } from '../../commands/hooks/useAgentCommands';
 import { useCreateCommand } from '../../commands/hooks/useCommands';
 import type { Command } from '../../commands/types';
+import { createCommandIdempotencyKey } from '../../commands/utils/idempotency';
 
 type AgentAdminActionsSectionProps = {
   agentId: string;
@@ -68,8 +69,8 @@ type PendingAdminAction = {
   timeoutSeconds?: number;
 };
 
-function buildIdempotencyKey(commandType: string) {
-  return `${commandType}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+function buildIdempotencyKey(commandType: string, agentId?: string) {
+  return createCommandIdempotencyKey(commandType, agentId, 'admin-action');
 }
 
 function parseCommandOutput(command?: Command | null): any | null {
@@ -249,7 +250,7 @@ export function AgentAdminActionsSection({ agentId }: AgentAdminActionsSectionPr
         agent_id: agentId,
         command_type: commandType,
         payload,
-        idempotency_key: buildIdempotencyKey(commandType),
+        idempotency_key: buildIdempotencyKey(commandType, agentId),
         timeout_seconds: timeoutSeconds,
       });
 
@@ -261,7 +262,7 @@ export function AgentAdminActionsSection({ agentId }: AgentAdminActionsSectionPr
             agent_id: agentId,
             command_type: followUpCommand.commandType,
             payload: followUpCommand.payload,
-            idempotency_key: buildIdempotencyKey(followUpCommand.commandType),
+            idempotency_key: buildIdempotencyKey(followUpCommand.commandType, agentId),
             timeout_seconds: followUpCommand.timeoutSeconds || 120,
           });
         }, 3500);

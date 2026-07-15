@@ -10,6 +10,7 @@ import { PageHeader } from '../../components/ui/PageHeader';
 import { commandTypes } from '../../types/command';
 import { formatDateTime } from '../../utils/date';
 import { downloadCsv } from '../../utils/exportCsv';
+import { createCommandIdempotencyKey } from '../../features/commands/utils/idempotency';
 
 export function CommandsPage() {
   const queryClient = useQueryClient();
@@ -29,7 +30,7 @@ export function CommandsPage() {
         command_type: commandType,
         payload: parsedPayload,
         timeout_seconds: 120,
-        idempotency_key: `${commandType}-${Date.now()}`,
+        idempotency_key: createCommandIdempotencyKey(commandType, agentId || undefined, 'commands-page'),
       });
     },
     onSuccess: () => {
