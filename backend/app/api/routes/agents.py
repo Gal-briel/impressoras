@@ -188,18 +188,23 @@ async def rotate_agent_credentials(
     agent_service: AgentService = Depends(get_agent_service),
 ):
     try:
-        # A validação multi-tenant fica preservada pela próxima sprint de RBAC; por ora não vaza dados de outro tenant.
-        new_plain_key = await agent_service.rotate_credentials(agent_id)
-
-        await log_audit_event(
-            tenant_id=current_user.tenant_id,
-            user_id=current_user.id,
-            action="agent_key_rotated",
-            target_type="agent",
-            target_id=agent_id,
-            ip_address=get_request_ip(request),
-            metadata_payload={},
+        new_plain_key = await agent_service.rotate_credentials(
+            agent_id=agent_id,
+            tenant_id=UUID(current_user.tenant_id),
         )
+
+        try:
+            await log_audit_event(
+                tenant_id=current_user.tenant_id,
+                user_id=current_user.id,
+                action="agent_key_rotated",
+                target_type="agent",
+                target_id=agent_id,
+                ip_address=get_request_ip(request),
+                metadata_payload={},
+            )
+        except Exception as exc:
+            print(f"[audit] falha ao auditar rotação de chave do agente {agent_id}: {exc}")
 
         return {
             "message": "Credentials rotated successfully.",
@@ -209,6 +214,8 @@ async def rotate_agent_credentials(
     except ValueError as exc:
         if str(exc) == "Agent revoked":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Agent revoked")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
+    except PermissionError:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent not found")
 
 

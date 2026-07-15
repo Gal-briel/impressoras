@@ -242,10 +242,14 @@ class AgentService:
             await self.repository.update(agent, {"api_key_hash": new_hash})
             await self.repository.session.commit()
 
-    async def rotate_credentials(self, agent_id: UUID) -> str:
+    async def rotate_credentials(self, agent_id: UUID, tenant_id: UUID) -> str:
         agent = await self.repository.get(agent_id)
         if not agent:
             raise ValueError("Agent not found")
+
+        if str(agent.tenant_id) != str(tenant_id):
+            raise PermissionError("Agent not found")
+
         if self.is_revoked(agent):
             raise ValueError("Agent revoked")
 
@@ -255,12 +259,15 @@ class AgentService:
         await self.repository.update(agent, {"api_key_hash": new_hash})
         await self.repository.session.commit()
 
-        await AgentEventService.log_event(
-            tenant_id=agent.tenant_id,
-            agent_id=agent.id,
-            event_type="credential_rotated",
-            message="API Key credentials successfully rotated. Previous key revoked.",
-            severity=EventSeverity.WARNING,
-        )
+        try:
+            await AgentEventService.log_event(
+                tenant_id=agent.tenant_id,
+                agent_id=agent.id,
+                event_type="credential_rotated",
+                message="API Key credentials successfully rotated. Previous key revoked.",
+                severity=EventSeverity.WARNING,
+            )
+        except Exception as exc:
+            print(f"[agent_rotate_key] falha ao registrar evento do agente {agent_id}: {exc}")
 
         return raw_new_key
