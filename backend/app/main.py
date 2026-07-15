@@ -122,16 +122,22 @@ configure_openapi(app)
 # --- AGENT_PACKAGE_ROUTES_START ---
 from pathlib import Path as _AgentPackagePath
 
+from fastapi import Depends as _AgentPackageDepends
 from fastapi import HTTPException as _AgentPackageHTTPException
 from fastapi.responses import FileResponse as _AgentPackageFileResponse
+
+from app.core.dependencies import require_agent_auth as _require_agent_auth
 
 
 _AGENT_PACKAGE_DIST = _AgentPackagePath(__file__).resolve().parents[2] / "agent" / "windows" / "dist"
 
 
 @app.get("/agent-packages/{filename}", include_in_schema=False)
-async def _download_agent_package(filename: str):
-    if "/" in filename or "\\" in filename or ".." in filename:
+async def _download_agent_package(
+    filename: str,
+    _agent_id: str = _AgentPackageDepends(_require_agent_auth),
+):
+    if "/" in filename or "\\" in filename or ".." in filename or not filename.lower().endswith(".zip"):
         raise _AgentPackageHTTPException(status_code=400, detail="Invalid package filename")
 
     package_path = _AGENT_PACKAGE_DIST / filename

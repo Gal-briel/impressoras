@@ -224,8 +224,27 @@ try {{
     New-Item -ItemType Directory -Force -Path $TempRoot | Out-Null
     New-Item -ItemType Directory -Force -Path $ExtractDir | Out-Null
 
-    Write-UpdateLog "Baixando pacote..."
-    Invoke-WebRequest -Uri $PackageUrl -OutFile $ZipPath -UseBasicParsing
+    $ConfigPath = Join-Path $InstallDir "config.json"
+
+    if (-not (Test-Path $ConfigPath)) {{
+        throw "config.json não encontrado para autenticar download do pacote."
+    }}
+
+    $AgentConfig = Get-Content $ConfigPath -Raw | ConvertFrom-Json
+    $AgentId = [string]$AgentConfig.agent_id
+    $AgentApiKey = [string]$AgentConfig.api_key
+
+    if (-not $AgentId -or -not $AgentApiKey) {{
+        throw "agent_id/api_key ausentes no config.json para download do pacote."
+    }}
+
+    $DownloadHeaders = @{{
+        "x-agent-id" = $AgentId
+        "Authorization" = "ApiKey $AgentApiKey"
+    }}
+
+    Write-UpdateLog "Baixando pacote autenticado..."
+    Invoke-WebRequest -Uri $PackageUrl -OutFile $ZipPath -UseBasicParsing -Headers $DownloadHeaders
 
     if (-not $ExpectedSha256 -or $ExpectedSha256.Length -ne 64) {{
         throw "SHA256 obrigatório ou inválido."
