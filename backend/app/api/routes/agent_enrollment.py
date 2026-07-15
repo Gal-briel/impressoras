@@ -11,8 +11,10 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_db_session
 from app.core.dependencies import CurrentUser, require_permissions
+from app.core.rate_limit import enforce_rate_limit
 from app.core.security import generate_api_key, get_api_key_hash
 from app.services.audit_service import get_request_ip, log_audit_event
 
@@ -182,6 +184,13 @@ async def enroll_agent(
     request: Request,
     session: AsyncSession = Depends(get_db_session),
 ):
+    await enforce_rate_limit(
+        request,
+        scope="agent:enroll",
+        limit=settings.RATE_LIMIT_ENROLLMENT_MAX_ATTEMPTS,
+        window_seconds=settings.RATE_LIMIT_ENROLLMENT_WINDOW_SECONDS,
+    )
+
     token = (payload.enrollment_token or "").strip()
 
     if not token:

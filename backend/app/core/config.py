@@ -25,6 +25,14 @@ class Settings(BaseSettings):
     REDIS_URL: str
     RABBITMQ_URL: str
 
+    # Rate limit
+    RATE_LIMIT_LOGIN_MAX_ATTEMPTS: int = 10
+    RATE_LIMIT_LOGIN_WINDOW_SECONDS: int = 300
+    RATE_LIMIT_REFRESH_MAX_ATTEMPTS: int = 30
+    RATE_LIMIT_REFRESH_WINDOW_SECONDS: int = 300
+    RATE_LIMIT_ENROLLMENT_MAX_ATTEMPTS: int = 5
+    RATE_LIMIT_ENROLLMENT_WINDOW_SECONDS: int = 600
+
     # CORS
     BACKEND_CORS_ORIGINS: str = (
         "http://localhost:5173,"
