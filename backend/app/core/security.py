@@ -29,8 +29,16 @@ def get_api_key_hash(api_key: str) -> str:
     return hashlib.sha256(api_key.encode("utf-8")).hexdigest()
 
 def verify_api_key(plain_api_key: str, hashed_api_key: str) -> bool:
-    """Compara o hash SHA-256."""
-    return get_api_key_hash(plain_api_key) == hashed_api_key
+    """Compara o hash SHA-256 em tempo constante."""
+    if not plain_api_key or not hashed_api_key:
+        return False
+
+    if not isinstance(plain_api_key, str) or not isinstance(hashed_api_key, str):
+        return False
+
+    candidate_hash = get_api_key_hash(plain_api_key)
+
+    return secrets.compare_digest(candidate_hash, hashed_api_key)
 
 def create_refresh_token(subject: str, tenant_id: str, permissions: list[str], expires_delta=None) -> str:
     from datetime import datetime, timedelta, timezone
