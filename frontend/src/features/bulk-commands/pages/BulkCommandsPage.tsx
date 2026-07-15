@@ -236,7 +236,7 @@ export function BulkCommandsPage() {
 
   const successCount = bulkResults.filter((item) => item.status === 'success').length;
   const failedCount = bulkResults.filter((item) =>
-    ['failed', 'timed_out', 'error', 'cancelled', 'canceled'].includes(String(item.status || '').toLowerCase())
+    ['failed', 'timed_out', 'timeout', 'expired', 'error', 'cancelled', 'canceled'].includes(String(item.status || '').toLowerCase())
   ).length;
   const pendingCount = Math.max(bulkResults.length - successCount - failedCount, 0);
 

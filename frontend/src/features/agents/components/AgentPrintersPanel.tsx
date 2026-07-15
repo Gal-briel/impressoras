@@ -101,6 +101,11 @@ function getCommandStatusLabel(status?: string) {
     case 'failed':
     case 'error':
       return 'Falhou';
+    case 'expired':
+      return 'Expirado';
+    case 'timed_out':
+    case 'timeout':
+      return 'Timeout';
     default:
       return status || 'Desconhecido';
   }
