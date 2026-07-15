@@ -7,16 +7,17 @@ from typing import Optional
 from uuid import UUID, uuid4
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.repositories.base import BaseRepository 
 from app.repositories.command_repository import CommandRepository
 from app.schemas.command import CommandCreate, CommandResponse
 from app.workers.rabbitmq import rabbitmq_client
 from app.infrastructure.database.enums import CommandStatus, EventSeverity
-from app.infrastructure.database.models import Agent
+from app.infrastructure.database.models import Agent, Command
 from app.services.agent_event_service import AgentEventService
 from app.websocket.manager import websocket_manager # NOVO IMPORT
-from app.services.command_policy import validate_and_authorize_command
+from app.services.command_policy import CommandPolicyViolation, validate_and_authorize_command
 
 logger = logging.getLogger(__name__)
 
@@ -166,13 +167,33 @@ def _sanitize_audit_value(value, depth: int = 0):
     return value
 
 
+
+def _canonical_command_payload(payload) -> str:
+    return json.dumps(
+        payload or {},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+
+
+def _same_idempotent_command(existing: Command, command_in: CommandCreate) -> bool:
+    return (
+        existing.command_type == command_in.command_type
+        and existing.timeout_seconds == command_in.timeout_seconds
+        and _canonical_command_payload(existing.payload or {})
+        == _canonical_command_payload(command_in.payload or {})
+    )
+
+
 class CommandService:
     def __init__(self, repository: CommandRepository, audit_repository: BaseRepository):
         self.repository = repository
         self.audit_repository = audit_repository
 
     async def dispatch_command(self, tenant_id: UUID, agent_id: UUID, user_id: UUID, command_in: CommandCreate, user_permissions: Optional[list[str]] = None, ip_address: Optional[str] = None) -> CommandResponse:
-        correlation_id = str(uuid4()) 
+        correlation_id = str(uuid4())
         now = datetime.now(timezone.utc)
 
         # Valida comando, permissão e payload antes de consultar agente,
@@ -183,7 +204,6 @@ class CommandService:
             permissions=user_permissions or [],
         )
 
-        
         # Segurança multi-tenant:
         # nunca cria comando para um agent_id que não pertença ao tenant do usuário.
         agent_result = await self.repository.session.execute(
@@ -198,32 +218,64 @@ class CommandService:
             raise PermissionError("Agent not found in current tenant")
 
         enrollment_status = str(getattr(agent.enrollment_status, "value", agent.enrollment_status)).lower()
+
         if agent.revoked_at is not None or enrollment_status == "revoked":
             raise PermissionError("Agent revoked")
 
         if enrollment_status != "approved":
             raise PermissionError("Agent not approved")
 
-        validate_and_authorize_command(
-            command_type=command_in.command_type,
-            payload=command_in.payload or {},
-            permissions=user_permissions or [],
+        # Idempotência:
+        # retry HTTP/clique duplo com a mesma chave deve devolver o mesmo comando.
+        # mesma chave com payload diferente deve ser bloqueada.
+        existing_result = await self.repository.session.execute(
+            select(Command).where(
+                Command.tenant_id == tenant_id,
+                Command.agent_id == agent_id,
+                Command.idempotency_key == command_in.idempotency_key,
+            )
         )
-        
+        existing_command = existing_result.scalar_one_or_none()
+
+        if existing_command:
+            if not _same_idempotent_command(existing_command, command_in):
+                raise CommandPolicyViolation(
+                    "Idempotency key already used with different command payload"
+                )
+
+            return CommandResponse.model_validate(existing_command)
+
         # Define o tempo limite de validade do comando para fins de expiração na fila
         expiration_time = now + timedelta(seconds=command_in.timeout_seconds)
-        
-        command = await self.repository.create(
-            obj_in=command_in,
-            tenant_id=tenant_id,
-            agent_id=agent_id,
-            user_id=user_id,
-            correlation_id=correlation_id,
-            status=CommandStatus.QUEUED,
-            created_at=now,
-            expires_at=expiration_time # Persiste a restrição de tempo
-        )
-        
+
+        try:
+            command = await self.repository.create(
+                obj_in=command_in,
+                tenant_id=tenant_id,
+                agent_id=agent_id,
+                user_id=user_id,
+                correlation_id=correlation_id,
+                status=CommandStatus.QUEUED,
+                created_at=now,
+                expires_at=expiration_time,
+            )
+        except IntegrityError:
+            await self.repository.session.rollback()
+
+            existing_result = await self.repository.session.execute(
+                select(Command).where(
+                    Command.tenant_id == tenant_id,
+                    Command.agent_id == agent_id,
+                    Command.idempotency_key == command_in.idempotency_key,
+                )
+            )
+            existing_command = existing_result.scalar_one_or_none()
+
+            if existing_command and _same_idempotent_command(existing_command, command_in):
+                return CommandResponse.model_validate(existing_command)
+
+            raise CommandPolicyViolation("Idempotency key conflict")
+
         # Registro do ciclo de vida no Audit Log.
         # Evita BaseRepository.create(obj_in={}), que quebrava porque dict não tem model_dump().
         command_payload = command.payload or {}
@@ -273,23 +325,28 @@ class CommandService:
             self.audit_repository.session.add(update_audit_log)
 
         await self.audit_repository.session.flush()
-        
+
         payload = {
             "command_id": str(command.id),
             "agent_id": str(agent_id),
             "command_type": command.command_type,
             "payload": command.payload,
-            "correlation_id": correlation_id 
+            "correlation_id": correlation_id,
         }
-        
-        await rabbitmq_client.publish_command(routing_key=f"agent.{agent_id}.commands", payload=payload)
+
+        await rabbitmq_client.publish_command(
+            routing_key=f"agent.{agent_id}.commands",
+            payload=payload,
+        )
         await self.repository.session.commit()
-        
+
         # Dispara evento de criação para o dashboard
         await websocket_manager.broadcast_event(
-            str(tenant_id), "command_created", {"command_id": str(command.id), "agent_id": str(agent_id)}
+            str(tenant_id),
+            "command_created",
+            {"command_id": str(command.id), "agent_id": str(agent_id)},
         )
-        
+
         return CommandResponse.model_validate(command)
 
     async def update_status_idempotent(self, command_id: UUID, new_status: CommandStatus, output: Optional[str] = None, error_code: Optional[str] = None) -> None:
