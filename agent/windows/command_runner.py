@@ -99,18 +99,84 @@ def get_printer_name(payload: dict[str, Any]) -> str:
 
 
 
+
+def _read_agent_base_url() -> str | None:
+    try:
+        config_path = Path(__file__).resolve().parent / "config.json"
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        base_url = str(config.get("base_url") or "").strip().rstrip("/")
+        return base_url or None
+    except Exception:
+        return None
+
+
+def _validate_update_sha256(value: str) -> str:
+    import re
+
+    normalized = str(value or "").strip().lower()
+
+    if not re.fullmatch(r"[a-f0-9]{64}", normalized):
+        raise ValueError("Payload obrigatório: sha256 válido com 64 caracteres hexadecimais")
+
+    return normalized
+
+
+def _normalize_update_package_url(package_url: str) -> str:
+    from urllib.parse import urljoin, urlparse
+
+    raw_url = str(package_url or "").strip()
+    base_url = _read_agent_base_url()
+
+    if not raw_url:
+        raise ValueError("Payload obrigatório: package_url")
+
+    if raw_url.startswith("/"):
+        if not base_url:
+            raise ValueError("Não foi possível validar package_url relativo sem base_url")
+        base = urlparse(base_url)
+        raw_url = urljoin(f"{base.scheme}://{base.netloc}", raw_url)
+
+    parsed = urlparse(raw_url)
+    host = (parsed.hostname or "").lower()
+
+    if parsed.scheme not in {"http", "https"} or not host:
+        raise ValueError("package_url inválido")
+
+    if parsed.scheme != "https" and host not in {"localhost", "127.0.0.1", "::1"}:
+        raise ValueError("package_url precisa usar HTTPS")
+
+    if parsed.query or parsed.fragment:
+        raise ValueError("package_url não pode conter query string ou fragmento")
+
+    if not parsed.path.startswith("/agent-packages/"):
+        raise ValueError("package_url precisa apontar para /agent-packages/")
+
+    if not parsed.path.lower().endswith(".zip"):
+        raise ValueError("package_url precisa apontar para um pacote .zip")
+
+    if base_url:
+        base = urlparse(base_url)
+        if parsed.netloc.lower() != base.netloc.lower():
+            raise ValueError("package_url precisa usar o mesmo host configurado no agente")
+
+    return raw_url
+
+
 def update_agent(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     payload = payload or {}
 
     package_url = payload.get("package_url")
     expected_sha256 = payload.get("sha256")
     new_version = payload.get("version")
-    task_name = payload.get("task_name") or "Gabriel Windows Agent"
+    task_name = payload.get("task_name") or "PrinterBridge Windows Agent"
 
-    if not package_url:
+    try:
+        package_url = _normalize_update_package_url(str(package_url or ""))
+        expected_sha256 = _validate_update_sha256(str(expected_sha256 or ""))
+    except ValueError as exc:
         return {
             "status": "error",
-            "message": "Payload obrigatório: package_url",
+            "message": str(exc),
         }
 
     install_dir = Path(__file__).resolve().parent
@@ -151,7 +217,7 @@ try {{
 
     Start-Sleep -Seconds 6
 
-    $TempRoot = Join-Path $env:TEMP ("gabriel-agent-update-" + [guid]::NewGuid().ToString())
+    $TempRoot = Join-Path $env:TEMP ("printerbridge-agent-update-" + [guid]::NewGuid().ToString())
     $ZipPath = Join-Path $TempRoot "agent.zip"
     $ExtractDir = Join-Path $TempRoot "extract"
 
@@ -161,16 +227,18 @@ try {{
     Write-UpdateLog "Baixando pacote..."
     Invoke-WebRequest -Uri $PackageUrl -OutFile $ZipPath -UseBasicParsing
 
-    if ($ExpectedSha256) {{
-        Write-UpdateLog "Validando SHA256..."
-        $ActualSha256 = (Get-FileHash -Path $ZipPath -Algorithm SHA256).Hash.ToLower()
-
-        if ($ActualSha256 -ne $ExpectedSha256.ToLower()) {{
-            throw "SHA256 inválido. Esperado=$ExpectedSha256 Atual=$ActualSha256"
-        }}
-
-        Write-UpdateLog "SHA256 validado."
+    if (-not $ExpectedSha256 -or $ExpectedSha256.Length -ne 64) {{
+        throw "SHA256 obrigatório ou inválido."
     }}
+
+    Write-UpdateLog "Validando SHA256..."
+    $ActualSha256 = (Get-FileHash -Path $ZipPath -Algorithm SHA256).Hash.ToLower()
+
+    if ($ActualSha256 -ne $ExpectedSha256.ToLower()) {{
+        throw "SHA256 inválido. Esperado=$ExpectedSha256 Atual=$ActualSha256"
+    }}
+
+    Write-UpdateLog "SHA256 validado."
 
     Write-UpdateLog "Extraindo pacote..."
     Expand-Archive -Path $ZipPath -DestinationPath $ExtractDir -Force
@@ -2249,7 +2317,13 @@ def _printerbridge_policy_validate_command(command_type, payload):
         if command_type == "update_agent":
             _pb_safe_text(payload, "version", required=False, max_len=64)
             _pb_safe_text(payload, "release_id", required=False, max_len=128)
-            _pb_safe_text(payload, "sha256", required=False, max_len=128)
+            _pb_safe_text(payload, "package_url", required=True, max_len=2048)
+            sha256 = _pb_safe_text(payload, "sha256", required=True, max_len=64)
+
+            import re
+
+            if not re.fullmatch(r"[A-Fa-f0-9]{64}", sha256.strip()):
+                raise ValueError("Invalid SHA256 field: sha256")
 
     except ValueError as exc:
         return _printerbridge_policy_error(str(exc))

@@ -1,5 +1,7 @@
 import ipaddress
 import json
+
+from app.core.config import settings
 from typing import Any, Iterable, Mapping
 
 
@@ -231,6 +233,58 @@ def _validate_printer_payload(command_type: str, payload: Mapping[str, Any]) -> 
         _validate_install_network_printer(payload)
 
 
+
+def _validate_sha256(value: str | None, field: str = "sha256") -> None:
+    import re
+
+    if not isinstance(value, str):
+        raise CommandPolicyViolation(f"Invalid field type: {field}")
+
+    normalized = value.strip()
+
+    if not re.fullmatch(r"[A-Fa-f0-9]{64}", normalized):
+        raise CommandPolicyViolation(f"Invalid SHA256 field: {field}")
+
+
+def _validate_agent_package_url(package_url: str | None) -> None:
+    from urllib.parse import urlparse
+
+    if not isinstance(package_url, str):
+        raise CommandPolicyViolation("Invalid field type: package_url")
+
+    normalized = package_url.strip()
+
+    if not normalized:
+        raise CommandPolicyViolation("Missing required field: package_url")
+
+    parsed = urlparse(normalized)
+    host = (parsed.hostname or "").lower()
+
+    if parsed.scheme not in {"http", "https"} or not host:
+        raise CommandPolicyViolation("Invalid package_url")
+
+    allowed_hosts = {
+        item.strip().lower()
+        for item in str(getattr(settings, "AGENT_PACKAGE_ALLOWED_HOSTS", "") or "").split(",")
+        if item.strip()
+    }
+
+    if allowed_hosts and host not in allowed_hosts:
+        raise CommandPolicyViolation("package_url host is not allowed")
+
+    if parsed.scheme != "https" and host not in {"localhost", "127.0.0.1", "::1"}:
+        raise CommandPolicyViolation("package_url must use HTTPS")
+
+    if parsed.query or parsed.fragment:
+        raise CommandPolicyViolation("package_url cannot include query string or fragment")
+
+    if not parsed.path.startswith("/agent-packages/"):
+        raise CommandPolicyViolation("package_url must point to /agent-packages/")
+
+    if not parsed.path.lower().endswith(".zip"):
+        raise CommandPolicyViolation("package_url must point to a .zip package")
+
+
 def _validate_system_payload(command_type: str, payload: Mapping[str, Any]) -> None:
     if command_type in {"start_service", "stop_service", "restart_service"}:
         _safe_text(payload, "service_name", required=True, max_len=128)
@@ -262,7 +316,10 @@ def _validate_system_payload(command_type: str, payload: Mapping[str, Any]) -> N
     if command_type == "update_agent":
         _safe_text(payload, "version", required=False, max_len=64)
         _safe_text(payload, "release_id", required=False, max_len=128)
-        _safe_text(payload, "sha256", required=False, max_len=128)
+        package_url = _safe_text(payload, "package_url", required=True, max_len=2048)
+        sha256 = _safe_text(payload, "sha256", required=True, max_len=64)
+        _validate_agent_package_url(package_url)
+        _validate_sha256(sha256)
 
 
 def _validate_read_payload(command_type: str, payload: Mapping[str, Any]) -> None:

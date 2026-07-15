@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     REDIS_URL: str
     RABBITMQ_URL: str
 
+    # Agent update packages
+    AGENT_PACKAGE_ALLOWED_HOSTS: str = "riverbank-class-licorice.ngrok-free.dev,localhost,127.0.0.1"
+
     # Rate limit
     RATE_LIMIT_LOGIN_MAX_ATTEMPTS: int = 10
     RATE_LIMIT_LOGIN_WINDOW_SECONDS: int = 300
