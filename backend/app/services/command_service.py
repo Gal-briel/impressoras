@@ -174,6 +174,15 @@ class CommandService:
     async def dispatch_command(self, tenant_id: UUID, agent_id: UUID, user_id: UUID, command_in: CommandCreate, user_permissions: Optional[list[str]] = None, ip_address: Optional[str] = None) -> CommandResponse:
         correlation_id = str(uuid4()) 
         now = datetime.now(timezone.utc)
+
+        # Valida comando, permissão e payload antes de consultar agente,
+        # gravar no banco ou publicar na fila.
+        validate_and_authorize_command(
+            command_type=command_in.command_type,
+            payload=command_in.payload or {},
+            permissions=user_permissions or [],
+        )
+
         
         # Segurança multi-tenant:
         # nunca cria comando para um agent_id que não pertença ao tenant do usuário.
