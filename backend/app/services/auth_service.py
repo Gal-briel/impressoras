@@ -132,7 +132,7 @@ class AuthService:
         try:
             payload = jwt.decode(
                 refresh_token,
-                settings.SECRET_KEY,
+                settings.JWT_SIGNING_KEY,
                 algorithms=[settings.ALGORITHM],
             )
 

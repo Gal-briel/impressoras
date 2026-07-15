@@ -56,6 +56,16 @@ class Settings(BaseSettings):
 
     @computed_field
     @property
+    def JWT_SIGNING_KEY(self) -> str:
+        """Chave usada exclusivamente para assinar/validar JWT.
+
+        Em desenvolvimento, permite fallback para SECRET_KEY para facilitar ambiente local.
+        Em produção, validate_runtime_security exige JWT_SECRET_KEY forte.
+        """
+        return str(self.JWT_SECRET_KEY or self.SECRET_KEY or "").strip()
+
+    @computed_field
+    @property
     def CORS_ORIGINS(self) -> list[str]:
         """Lista de origens permitidas para CORS.
 
@@ -182,7 +192,7 @@ def validate_runtime_security() -> None:
     if secret_key.lower() in weak_values or len(secret_key) < 32:
         raise RuntimeError("Configuração insegura: SECRET_KEY forte é obrigatória em produção.")
 
-    if jwt_secret_key and (jwt_secret_key.lower() in weak_values or len(jwt_secret_key) < 32):
+    if jwt_secret_key.lower() in weak_values or len(jwt_secret_key) < 32:
         raise RuntimeError("Configuração insegura: JWT_SECRET_KEY forte é obrigatória em produção.")
 
     if not database_url:

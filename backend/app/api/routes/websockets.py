@@ -22,7 +22,7 @@ async def dashboard_websocket_endpoint(websocket: WebSocket, token: str | None =
         return
 
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(token, settings.JWT_SIGNING_KEY, algorithms=[settings.ALGORITHM])
         tenant_id = payload.get("tenant_id")
         user_id = payload.get("sub")
         if not tenant_id or not user_id:

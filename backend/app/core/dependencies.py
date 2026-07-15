@@ -31,7 +31,7 @@ class CurrentUser:
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Security(security)) -> CurrentUser:
     try:
-        payload = jwt.decode(credentials.credentials, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(credentials.credentials, settings.JWT_SIGNING_KEY, algorithms=[settings.ALGORITHM])
         user_id: str = payload.get("sub")
         tenant_id: str = payload.get("tenant_id")
         permissions: list[str] = payload.get("permissions", [])

@@ -61,7 +61,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
             token = auth_header.split(" ")[1]
             try:
                 # Decode passivo (confiando que a rota já validou a assinatura se necessário)
-                payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+                payload = jwt.decode(token, settings.JWT_SIGNING_KEY, algorithms=[settings.ALGORITHM])
                 return payload.get("sub"), payload.get("tenant_id")
             except Exception:
                 pass
