@@ -212,7 +212,13 @@ def safe_result_success(result):
     if isinstance(result, dict):
         status = str(result.get("status", "")).lower()
 
-        if status in ("scheduled", "success", "ok"):
+        if status in ("success", "ok"):
+            return True
+
+        if status in ("failed", "failure", "error"):
+            return False
+
+        if status == "scheduled":
             return True
 
         if "success" in result:
@@ -267,6 +273,10 @@ def process_command(client: GabrielApiClient, command: dict[str, Any]) -> None:
     command_type = command["command_type"]
     payload = command.get("payload") or {}
 
+    if command_type == "update_agent":
+        payload = dict(payload)
+        payload["_command_id"] = command_id
+
     logging.info("Executando comando %s (%s)", command_id, command_type)
 
     client.update_command_status(command_id, "acknowledged")
@@ -278,6 +288,22 @@ def process_command(client: GabrielApiClient, command: dict[str, Any]) -> None:
     if printers is not None:
         inventory_response = client.send_printer_inventory(printers)
         logging.info("Inventário enviado: %s", inventory_response)
+
+    if (
+        command_type == "update_agent"
+        and isinstance(result, dict)
+        and str(result.get("status", "")).lower() == "scheduled"
+    ):
+        client.update_command_status(
+            command_id,
+            "executing",
+            output=safe_result_output(result),
+        )
+        logging.info(
+            "Comando %s agendado; aguardando resultado final do updater.",
+            command_id,
+        )
+        return
 
     if safe_result_success(result):
         client.update_command_status(

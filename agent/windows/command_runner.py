@@ -169,6 +169,7 @@ def update_agent(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     expected_sha256 = payload.get("sha256")
     new_version = payload.get("version")
     task_name = payload.get("task_name") or "PrinterBridge Windows Agent"
+    command_id = str(payload.get("_command_id") or "").strip()
 
     try:
         package_url = _normalize_update_package_url(str(package_url or ""))
@@ -191,6 +192,7 @@ def update_agent(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     expected_sha256_ps = str(expected_sha256 or "").replace("'", "''")
     new_version_ps = str(new_version or "").replace("'", "''")
     task_name_ps = str(task_name).replace("'", "''")
+    command_id_ps = str(command_id).replace("'", "''")
     install_dir_ps = str(install_dir).replace("'", "''")
     updater_log_ps = str(updater_log).replace("'", "''")
 
@@ -202,6 +204,7 @@ $PackageUrl = '{package_url_ps}'
 $ExpectedSha256 = '{expected_sha256_ps}'
 $NewVersion = '{new_version_ps}'
 $TaskName = '{task_name_ps}'
+$CommandId = '{command_id_ps}'
 $LogPath = '{updater_log_ps}'
 
 function Write-UpdateLog {{
@@ -236,6 +239,60 @@ try {{
 
     if (-not $AgentId -or -not $AgentApiKey) {{
         throw "agent_id/api_key ausentes no config.json para download do pacote."
+    }}
+
+    $BaseUrl = [string]$AgentConfig.base_url
+
+    if (-not $BaseUrl) {{
+        throw "base_url ausente no config.json para reportar status final."
+    }}
+
+    $BaseUrl = $BaseUrl.TrimEnd("/")
+
+    if (-not $BaseUrl.EndsWith("/api/v1")) {{
+        $BaseUrl = "$BaseUrl/api/v1"
+    }}
+
+    $StatusUrl = "$BaseUrl/agent/commands/$CommandId/status"
+
+    $StatusHeaders = @{{
+        "x-agent-id" = $AgentId
+        "Authorization" = "ApiKey $AgentApiKey"
+        "Content-Type" = "application/json"
+    }}
+
+    function Send-CommandStatus {{
+        param(
+            [string]$Status,
+            [string]$Output,
+            [string]$ErrorCode
+        )
+
+        if (-not $CommandId -or -not $StatusUrl) {{
+            return
+        }}
+
+        $Body = @{{
+            status = $Status
+            output = $Output
+        }}
+
+        if ($ErrorCode) {{
+            $Body.error_code = $ErrorCode
+        }}
+
+        try {{
+            Invoke-RestMethod `
+                -Method Post `
+                -Uri $StatusUrl `
+                -Headers $StatusHeaders `
+                -Body ($Body | ConvertTo-Json -Depth 8 -Compress) `
+                -ContentType "application/json" | Out-Null
+
+            Write-UpdateLog "Status final enviado ao backend: $Status"
+        }} catch {{
+            Write-UpdateLog ("Aviso: falha ao enviar status final ao backend: " + $_.Exception.Message)
+        }}
     }}
 
     $DownloadHeaders = @{{
@@ -317,6 +374,19 @@ try {{
         }}
     }}
 
+    $SuccessOutput = @{{
+        status = "success"
+        message = "Atualização do agente aplicada com sucesso. Reinício da tarefa será executado em seguida."
+        package_url = $PackageUrl
+        version = $NewVersion
+        task_name = $TaskName
+        actual_sha256 = $ActualSha256
+        restart_requested = $true
+    }} | ConvertTo-Json -Depth 8 -Compress
+
+    Send-CommandStatus -Status "success" -Output $SuccessOutput
+    Write-UpdateLog "Status de sucesso enviado ao backend antes de reiniciar tarefa."
+
     Write-UpdateLog "Reiniciando tarefa do agente..."
 
     try {{
@@ -338,7 +408,18 @@ try {{
 
     Write-UpdateLog "Atualização concluída com sucesso."
 }} catch {{
-    Write-UpdateLog ("ERRO: " + $_.Exception.Message)
+    $ErrorMessage = $_.Exception.Message
+    Write-UpdateLog ("ERRO: " + $ErrorMessage)
+
+    try {{
+        Send-CommandStatus `
+            -Status "failed" `
+            -Output ("Atualização do agente falhou: " + $ErrorMessage) `
+            -ErrorCode "UPDATE_AGENT_FAILED"
+    }} catch {{
+        Write-UpdateLog ("Aviso: falha ao registrar erro final: " + $_.Exception.Message)
+    }}
+
     exit 1
 }}
 """
