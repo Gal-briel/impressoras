@@ -1,6 +1,7 @@
 # backend/app/services/command_service.py
 import asyncio
 import json
+import re
 import logging
 from typing import Optional
 from uuid import UUID, uuid4
@@ -32,6 +33,94 @@ SENSITIVE_AUDIT_KEYS = {
     "credentials",
     "private_key",
 }
+
+
+MAX_COMMAND_OUTPUT_CHARS = 500_000
+
+
+def _is_sensitive_key(key: object) -> bool:
+    key_text = str(key).lower()
+    return any(secret in key_text for secret in SENSITIVE_AUDIT_KEYS)
+
+
+def _redact_sensitive_text(value: str) -> str:
+    text = str(value)
+
+    patterns = [
+        r"(?i)(authorization\s*[:=]\s*)(bearer|apikey)?\s*[A-Za-z0-9._~+/=-]{12,}",
+        r"(?i)((?:api[_-]?key|apikey|token|password|senha|secret)\s*[:=]\s*)[\"']?[^\"'\s,;}]+",
+    ]
+
+    for pattern in patterns:
+        text = re.sub(pattern, r"\1[redacted]", text)
+
+    return text
+
+
+def _limit_command_output_text(value: str) -> str:
+    text = str(value)
+
+    if len(text) <= MAX_COMMAND_OUTPUT_CHARS:
+        return text
+
+    preview = text[:MAX_COMMAND_OUTPUT_CHARS]
+
+    return json.dumps(
+        {
+            "_truncated": True,
+            "message": "Output truncado pelo backend para proteger banco/painel.",
+            "original_length": len(text),
+            "max_length": MAX_COMMAND_OUTPUT_CHARS,
+            "preview": preview,
+        },
+        ensure_ascii=False,
+        default=str,
+    )
+
+
+def _sanitize_command_output_value(value, depth: int = 0):
+    if depth > 8:
+        return "[truncated-depth]"
+
+    if isinstance(value, dict):
+        clean = {}
+
+        for key, item in value.items():
+            if _is_sensitive_key(key):
+                clean[str(key)] = "[redacted]"
+            else:
+                clean[str(key)] = _sanitize_command_output_value(item, depth + 1)
+
+        return clean
+
+    if isinstance(value, list):
+        return [_sanitize_command_output_value(item, depth + 1) for item in value]
+
+    if isinstance(value, str):
+        return _redact_sensitive_text(value)
+
+    return value
+
+
+def sanitize_command_output(output):
+    if output is None:
+        return None
+
+    if isinstance(output, (dict, list)):
+        sanitized = _sanitize_command_output_value(output)
+        text = json.dumps(sanitized, ensure_ascii=False, default=str)
+        return _limit_command_output_text(text)
+
+    raw_text = str(output)
+
+    try:
+        parsed = json.loads(raw_text)
+    except Exception:
+        return _limit_command_output_text(_redact_sensitive_text(raw_text))
+
+    sanitized = _sanitize_command_output_value(parsed)
+    text = json.dumps(sanitized, ensure_ascii=False, default=str)
+    return _limit_command_output_text(text)
 
 
 def _safe_audit_output(value):
@@ -221,6 +310,7 @@ class CommandService:
 
         # Executa a transição segura
         now = datetime.now(timezone.utc)
+        sanitized_output = sanitize_command_output(output)
         update_data = {"status": new_status}
 
         if new_status in [CommandStatus.DISPATCHED, CommandStatus.ACKNOWLEDGED]:
@@ -238,7 +328,7 @@ class CommandService:
                 update_data["finished_at"] = now
 
         if output is not None:
-            update_data["output"] = output
+            update_data["output"] = sanitized_output
         if error_code is not None:
             update_data["error_code"] = error_code
 
@@ -263,6 +353,8 @@ class CommandService:
         if command.status in terminal_statuses:
             return
 
+        sanitized_output = sanitize_command_output(output)
+
         if payload_status == "FAILED":
             # Requisito: verificar se ainda há tentativas disponíveis para reprocessar automaticamente
             if command.retry_count < command.max_retries:
@@ -278,7 +370,7 @@ class CommandService:
                     "status": CommandStatus.QUEUED,
                     "retry_count": new_retry_count,
                     "error_code": error_code,
-                    "output": output
+                    "output": sanitized_output
                 }
                 await self.repository.update(command, update_data)
                 
@@ -328,7 +420,7 @@ class CommandService:
 
         update_data = {
             "status": final_status,
-            "output": output,
+            "output": sanitized_output,
             "error_code": error_code if final_status == CommandStatus.FAILED else None,
             "finished_at": now,
         }
@@ -350,7 +442,7 @@ class CommandService:
             "status": str(final_status.value if hasattr(final_status, "value") else final_status),
             "payload_status": payload_status,
             "error_code": error_code,
-            "output": _safe_audit_output(output),
+            "output": _safe_audit_output(sanitized_output),
         }
 
         audit_action = "agent_update_finished" if command.command_type == "update_agent" else "command_finished"
