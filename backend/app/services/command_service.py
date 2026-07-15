@@ -250,8 +250,17 @@ class CommandService:
         if not command:
             return
 
-        # Impede alterações se o comando já estiver em um estado terminal de sucesso ou cancelamento
-        if command.status in [CommandStatus.SUCCESS, CommandStatus.CANCELLED]:
+        # Impede alterações se o comando já estiver em qualquer estado terminal.
+        # Isso evita que respostas atrasadas do agente sobrescrevam um FAILED/EXPIRED,
+        # por exemplo um update_agent que falhou por SHA inválido e depois receba outro status.
+        terminal_statuses = [
+            CommandStatus.SUCCESS,
+            CommandStatus.FAILED,
+            CommandStatus.CANCELLED,
+            CommandStatus.EXPIRED,
+        ]
+
+        if command.status in terminal_statuses:
             return
 
         if payload_status == "FAILED":
