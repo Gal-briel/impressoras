@@ -30,7 +30,7 @@ SENSITIVE_PATTERN="SECRET_KEY=|JWT_SECRET_KEY=|DATABASE_URL=|SYNC_DATABASE_URL=|
 
 while read -r -d '' file; do
     # Verifica allowlist para não rodar grep de conteúdo
-    if echo "$file" | grep -Eq '(^AGENTS\.md$|^README\.md$|\.example$)'; then
+    if echo "$file" | grep -Eq '(^AGENTS\.md$|^README\.md$|\.example$|^scripts/check-secrets\.sh$|^scripts/check-critical-contracts\.sh$|^scripts/test-check-critical-contracts\.sh$)'; then
         continue
     fi
     

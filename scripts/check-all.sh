@@ -11,6 +11,12 @@ bash "$SCRIPT_DIR/test-check-secrets.sh"
 echo "--- Iniciando Check Secrets ---"
 bash "$SCRIPT_DIR/check-secrets.sh"
 
+echo "--- Iniciando Teste de Check Critical Contracts ---"
+bash "$SCRIPT_DIR/test-check-critical-contracts.sh"
+
+echo "--- Iniciando Check Critical Contracts ---"
+bash "$SCRIPT_DIR/check-critical-contracts.sh"
+
 echo "--- Iniciando Check Backend ---"
 bash "$SCRIPT_DIR/check-backend.sh"
 

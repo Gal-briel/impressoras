@@ -60,6 +60,7 @@ Antes de entregar uma alteração, certifique-se de realizar o checklist:
 ## 6. Scripts de Validação (scripts/)
 Toda alteração deve ser validada localmente com scripts idempotentes que falham (exit != 0) caso haja erro:
 - `./scripts/check-secrets.sh` (Validação anti-segredos e anti-arquivos proibidos)
+- `./scripts/check-critical-contracts.sh` (Validação anti-regressão de contratos críticos e segurança)
 - `./scripts/check-backend.sh`
 - `./scripts/check-frontend.sh`
 - `./scripts/check-all.sh`
