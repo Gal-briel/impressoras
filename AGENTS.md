@@ -14,7 +14,7 @@ Este documento serve como guia e conjunto de regras absolutas para IAs e desenvo
 
 ## 2. Regras de Segurança (MUITO IMPORTANTE)
 - **É estritamente proibido** ler, imprimir, modificar ou versionar os seguintes arquivos:
-  - Arquivos `.env` e `.env.*` reais (exeto `.env.example`).
+  - Arquivos `.env` e `.env.*` reais (exceto `.env.example`).
   - `config.json` do agente ou qualquer arquivo contendo secrets, tokens, senhas ou API keys reais.
   - Histórico de comandos (ex: `.bash_history`).
 - **NUNCA** envie dados do cliente ou do projeto para URLs/serviços externos de forma arbitrária (exceto conexões locais como `127.0.0.1` para validação de dev).
@@ -61,3 +61,34 @@ Toda alteração deve ser validada localmente com scripts idempotentes que falha
 - `./scripts/check-backend.sh`
 - `./scripts/check-frontend.sh`
 - `./scripts/check-all.sh`
+
+## 7. Regras Anti-Regressão para IAs
+
+Antes de alterar arquivos existentes, principalmente workflows, scripts, serviços centrais, autenticação, comandos remotos ou agente Windows:
+
+1. Verifique se o arquivo já existe no Git:
+   - `git ls-files <arquivo>`
+   - `git diff -- <arquivo>`
+
+2. Nunca substitua um arquivo inteiro sem listar o que será removido.
+
+3. Sempre compare comportamento antigo vs. novo:
+   - O que o código antigo fazia?
+   - O que o novo código deixará de fazer?
+   - Qual teste/script cobre a funcionalidade removida?
+
+4. Se remover validações, serviços, jobs de CI, comandos de segurança, auditoria, websocket ou filtros multi-tenant, pare e peça revisão humana.
+
+5. Ao alterar CI ou scripts de validação, preservar obrigatoriamente:
+   - validação do backend;
+   - testes automatizados;
+   - build do frontend;
+   - validação sintática do agente Windows;
+   - `git diff --check`.
+
+6. No relatório final, sempre informar:
+   - arquivos novos;
+   - arquivos modificados;
+   - arquivos removidos;
+   - funcionalidades removidas;
+   - justificativa para cada remoção.

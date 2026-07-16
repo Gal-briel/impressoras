@@ -26,6 +26,14 @@ echo "Checando sintaxe com py_compile nos arquivos principais..."
 # Compilar arquivos ignorando __pycache__ e dependências locais
 find app -name "*.py" -exec python -m py_compile {} +
 
+AGENT_DIR="$BASE_DIR/agent/windows"
+if [ -d "$AGENT_DIR" ]; then
+    echo "Checando sintaxe do agente Windows..."
+    find "$AGENT_DIR" -maxdepth 2 -name "*.py" -exec python -m py_compile {} +
+else
+    echo "Aviso: diretório do agente Windows não encontrado em $AGENT_DIR."
+fi
+
 if command -v pytest >/dev/null 2>&1; then
     echo "Rodando pytest..."
     pytest

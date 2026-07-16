@@ -1,85 +1,53 @@
-name: SaaS Platform CI
+name: CI Workflow
 
 on:
   push:
     branches:
-      - main
+      - sprint-26-release-candidate
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  backend-check:
+  validate:
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: saas
-          POSTGRES_PASSWORD: saas
-          POSTGRES_DB: saas_platform
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd="pg_isready -U saas -d saas_platform"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
-
-      redis:
-        image: redis:7
-        ports:
-          - 6379:6379
-
-      rabbitmq:
-        image: rabbitmq:3-management
-        env:
-          RABBITMQ_DEFAULT_USER: saas
-          RABBITMQ_DEFAULT_PASS: saas
-        ports:
-          - 5672:5672
-
-    env:
-      POSTGRES_SERVER: localhost
-      POSTGRES_HOST: localhost
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: saas_platform
-      POSTGRES_USER: saas
-      POSTGRES_PASSWORD: saas
-      REDIS_URL: redis://localhost:6379/0
-      RABBITMQ_URL: amqp://saas:saas@localhost:5672/
-      SECRET_KEY: dev-secret-key
-      JWT_SECRET_KEY: dev-jwt-secret-key
-      API_V1_STR: /api/v1
-
     steps:
-      - name: Baixar código
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Configurar Python
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'frontend/package-lock.json'
+
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          # Documentação: Utilizando Python 3.13 como a versão mais recente
+          # suportada nativamente de forma estável no GitHub Actions.
+          # A versão 3.14 (usada localmente) pode ainda não estar garantida no runner oficial.
+          python-version: '3.13'
+          cache: 'pip'
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
 
-      - name: Instalar dependências do backend
-        working-directory: backend
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+      - name: Install Frontend Dependencies
+        working-directory: ./frontend
+        run: npm ci
 
-      - name: Validar sintaxe do backend
+      - name: Install Backend Dependencies
+        working-directory: ./backend
         run: |
-          python -m compileall -q backend
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
 
-      - name: Validar sintaxe do agente
-        run: |
-          python -m compileall -q agent
+      - name: Make scripts executable
+        run: chmod +x scripts/*.sh
 
-      - name: Inicializar banco local
-        working-directory: backend
-        run: |
-          PYTHONPATH=. python scripts/init_dev_db.py
-
-      - name: Criar dados de teste
-        working-directory: backend
-        run: |
-          PYTHONPATH=. python scripts/seed_dev_data.py
+      - name: Run Check All Script
+        run: ./scripts/check-all.sh
