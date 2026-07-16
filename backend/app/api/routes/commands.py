@@ -268,11 +268,10 @@ async def agent_list_pending_commands(
         status_value = command.status.value if hasattr(command.status, "value") else str(command.status)
 
         if status_value == CommandStatus.QUEUED.value:
+            await command_service.update_status_idempotent(command.id, CommandStatus.DISPATCHED)
             command.status = CommandStatus.DISPATCHED
             if getattr(command, "dispatched_at", None) is None:
                 command.dispatched_at = now
-
-    await session.commit()
 
     return {
         "items": [
