@@ -55,9 +55,11 @@ Antes de entregar uma alteração, certifique-se de realizar o checklist:
    - Resultados reais das validações locais.
    - Riscos residuais / revisão manual necessária.
    - Confirmação de que NÃO leu/alterou segredos, e que NÃO executou `git add/commit/push`.
+   - Saída de `git diff --name-status`.
 
 ## 6. Scripts de Validação (scripts/)
 Toda alteração deve ser validada localmente com scripts idempotentes que falham (exit != 0) caso haja erro:
+- `./scripts/check-secrets.sh` (Validação anti-segredos e anti-arquivos proibidos)
 - `./scripts/check-backend.sh`
 - `./scripts/check-frontend.sh`
 - `./scripts/check-all.sh`
@@ -85,6 +87,7 @@ Antes de alterar arquivos existentes, principalmente workflows, scripts, serviç
    - build do frontend;
    - validação sintática do agente Windows;
    - `git diff --check`.
+   - **Nota de Segurança:** Qualquer alteração em scripts de segurança ou validação de segredos precisa ter um teste próprio que garanta a detecção de falsos positivos e negativos.
 
 6. No relatório final, sempre informar:
    - arquivos novos;
